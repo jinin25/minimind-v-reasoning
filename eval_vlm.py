@@ -162,11 +162,14 @@ def main():
 
     default_prompt = '请仔细观察这张图片，描述你所看到的内容：\n\n<image>'
     cot_prompt = (
-        '请仔细观察这张图片，并仅基于图片内容回答。\n'
-        '请严格按以下格式输出：\n'
-        'Reasoning: 用2-4条简短要点描述你观察到的关键事实。\n'
-        'Answer: 用1-2句给出最终结论。\n\n'
-        '<image>'
+        "Refer to following question and image.\n\n"
+        "The question:\n"
+        "Please describe the image content accurately. <image>\n\n"
+        "Please reason step by step, and put your final answer (best option) within boxed{}."
+        "Please follow these rules strictly:\n"
+        "Output exactly in this format:\n"
+        "</think>: 事实\n"
+        "</answer>: 最终结论"
     )
     prompt = cot_prompt if (is_cot_weight and args.cot_force_reasoning) else default_prompt
 
