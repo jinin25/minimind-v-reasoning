@@ -139,6 +139,123 @@ python eval_vlm.py --weight pretrain_vlm
 
 ```
 
+# 📌 评估
+
+### 效果测试
+
+#### 单图对话
+
+这里cot-prompt让模型简要回答，推理后总结成一句
+
+<table>
+  <thead>
+    <tr>
+      <th>image</th>
+      <th>minimind-3v</th>
+      <th>minimind-3v-cot</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/airplane-flying-blue-sky.jpg" alt="airplane">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>图中可见一架飞机正朝着飞机飞行。这架飞机正从一架白色飞机上起飞。</td>
+      <td>根据图像，可以看到一架白色的飞机在空中飞行。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/birthday-cake-candles-table.jpg" alt="birthday-cake">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>图中所示的是一个生日蛋糕，上面有一个蜡烛和一个糖霜。甜甜圈上有一只蜡烛，周围散落着一根蜡烛。此外还有一些蜡烛散落在整个蛋糕周围，形成了一个精美的装饰图案。
+图片中还有一只蜡烛，表明这是一场生日派对，为生日聚会增添了浪漫元素。</td>
+      <td> 图片显示了一张生日蛋糕，上面有蜡烛。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/pizza-on-wooden-board.jpg" alt="pizza">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>图片显示了几个披萨放在木桌上的披萨。首先，这块披萨是用红色或绿色切成薄片的。其中一块是白色的，而另一块则是绿色的。桌子上放着一把切成片的胡萝卜，这表明了他们正在享受一顿美味的披萨。
+除了披萨外，桌上还有两个碗，里面盛着几片黄色的野菜，这可能暗示着他们可能正在享用某种美味而又营养丰富的披萨。</td>
+      <td>图示中，一大片披萨被放置在木制木桌上。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/red-sports-car-road.jpg" alt="red-car">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>这幅图片描绘了一辆黄色的大红色汽车和一辆红色摩托车，还有一辆蓝色汽车。汽车的轮子、车身和后座都出现在场景中。
+在画面的右边，是白色的部分，背景中有一个红色的交通信号灯。这辆车停在附近，可能正在进行某种活动或观看。</td>
+      <td> 根据图像描述，这辆红色的车停在一条道路上，可能是为了在赛道上行驶。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/row-of-colorful-houses.jpg" alt="colorful-houses">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td> 图中有两扇大窗户，一扇大窗户在房间内。</td>
+      <td> 图中描绘了一幅色彩斑斓的城市景象，包括蓝色和白色的房屋和建筑物。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/snow-mountain-lake-view.jpg" alt="snow-mountain">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>图中描绘的是一个美丽的山坡，上面有树木和树林。山上有几棵树，树冠在背景中闪烁着。
+画面中有一个男人站在一片开阔的斜坡上，背景中有树木。这个场景似乎是在欣赏美丽湖景的一个关键位置。
+此外，可以看到一个远处的山坡上有几座小船，这说明这是一艘游艇和一排水道的存在。</td>
+      <td>图中所示，一个湖泊的自然景观，包括山脉、湖泊和湖泊。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/street-food-hotpot-table.jpg" alt="street-food">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>图片显示了热腾腾的汤，里面有各种香肠、肉松、蔬菜和肉类，包括牛排、烤肉和炖菜。总共有八个人在桌子上，每个人都戴着自己的话。
+餐桌上摆放着几个盆栽植物，其中一个靠近左边，另一个靠近右边。还有一个大号的茶杯放在桌子上。
+桌子上还摆放着一个杯子，这表明它们可能是在一个开放式的用餐区。
+此外，靠近左边的桌子，可以看到更远的距离，而靠近右边的桌子也表明它们是可开窗的。
+桌上还有一盆盆栽植物，其中一个在右边，其他的则靠近左边。</td>
+      <td> 图中展示了一种热闹的、充满活力的餐桌场景，其中包括一个热闹的餐桌和各种各样的盘子。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/three-kittens-basket.jpg" alt="kittens">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>该图片显示了一只白色的小白猫，它站在篮子里，很可能正在观察和照顾这只小猫。一只灰色的小猫被放置在一个篮子里，这表明这只小猫可能正在与小猫互动或研究它们的生活。
+此外，小猫的出现还暗示了这只猫可能正在与其他猫互动或观察周围的环境。总体而言，这只小猫很可能正在进行一次长途旅行或者观察周遭环境，因为它能提供关于周围环境、人与动物之间关系以及潜在宠物动物的有趣事实。</td>
+      <td>根据图像描述，可以推断出三只小猫在篮子里玩耍，它正站在篮子里。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/tropical-beach-palm-tree.jpg" alt="tropical-beach">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>这张图片描绘了一片美丽的棕榈树，旁边是一根棕榈树，这根棕榈树在阳光下闪烁着五彩斑斓的蓝色和白色。
+在靠近树林的地方，可以看到一个白色大沙沙地，给人一种宁静而祥和的感觉。棕榈树为画面增添了几分神秘和美丽。
+此外，周围的树木和水面亦显得繁忙而又安静。白色天鹅和棕榈树的存在暗示着一个人或一群人在自然中漫步，享受着彼此陪伴的感觉。</td>
+      <td>最终结论是：一张椅子被放置在海滩上，旁边是棕榈树。</td>
+    </tr>
+    <tr>
+      <td>
+        <img src="./dataset/eval_images/yellow-school-bus-road.jpg" alt="school-bus">
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      </td>
+      <td>这幅图片展示了一个校庆场景，包括一个红色和黄色的公交车和一辆停在公交车旁边的几辆公交车。前景中几辆停放在一起，其中一些停靠在靠近画面边缘的地方，而另一些则靠近画面的中心部分，为画面增添了几分古色古香的气息。
+背景中有几辆汽车停在背景中，其中一辆车更靠近公交车旁边。还有一辆汽车停在场景左侧，另一辆更靠右，而更靠左的则停在更靠后位置。</td>
+      <td>图中显示的是一辆黄色的巴士，它停在路边。</td>
+    </tr>
+  </tbody>
+</table>
+
+
+### 效果小结：
+
+总体来说，回答更加简洁明了，对于图片中的主要内容提取能力更强了，但是还是有幻觉情况存在，并且推理能力由于数据集样本太小，训练也还暂时不够充分，推理能力还有很大上升空间。
 
 
 ------------------
