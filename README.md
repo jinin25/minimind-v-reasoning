@@ -30,21 +30,13 @@ print(torch.cuda.is_available())
 
 ### 2' 数据下载
 
-minimind-v 原项目数据集（Pretrain+SFT阶段）：
+**minimind-v 原项目数据集（Pretrain+SFT阶段）：**
 
 
 从下文提供的[数据集链接](https://huggingface.co/datasets/jingyaogong/minimind-v_dataset)
 下载所需内容并放到`./dataset`下。
 
 
-Cot阶段数据集：
-
-从[MMMU](https://huggingface.co/datasets/modelscope/MMMU-Reasoning-Distill-Validation)和[Share4oReasoning](https://huggingface.co/datasets/Share4oReasoning)
-下载所需内容并放到`./dataset`下，并执行下述命令，将数据集清洗为parquet格式：
-
-```bash 
-python build_cot_sft.py --mmmu_path dataset/MMMU-Reasoning-Distill-Validation --share4o_path dataset/Share4oReasoning
-```
 
 <details>
 <summary>下载pretrain/sft数据须知</summary>
@@ -67,7 +59,44 @@ wget https://hf-mirror.com/datasets/jingyaogong/minimind-v_dataset/resolve/main/
 
 
 
+**推理阶段数据：(CoT SFT + RL阶段)**
+
+
+CoT SFT数据：
+
+这个阶段的数据集是通过将原项目中SFT数据进行蒸馏得到，具体实现见dataset/distilled_sft_i2t.py
+
+
+RL阶段数据：
+
+这里使用的是[Innovator-VL-RL-172K](
+https://huggingface.co/datasets/InnovatorLab/Innovator-VL-RL-172K)
+
+
+<details>
+<summary>下载RL，蒸馏数据须知</summary>
+
+CoT SFT蒸馏：
+```bash
+export DISTILL_API_KEY="你的api key"
+python dataset/distilled_sft_i2t.py
+``` 
+这个蒸馏过程需要调用外部api，对数据生成解释，比较耗时。
+
+
+RL数据：
+```python
+from datasets import load_dataset
+
+ds = load_dataset("InnovatorLab/Innovator-VL-RL-172K")
+```
+
+RL数据大概需要占据~10GB的空间，建议提前做好准备。
+</details>
+
 ### 3' 开始训练
+
+这里为了适配推理任务，LLM部分使用的是minimind官方提供的reasoning权重（在out/llm_768.pth），训练分为三个阶段：
 
 **3.1 预训练（学图像描述）**
 
@@ -88,12 +117,22 @@ python train_sft_vlm.py --epochs 2 --from_weight pretrain_vlm
 
 > 执行监督微调，得到 `sft_vlm_*.pth` 作为指令微调的输出权重
 
+**3.3 第1.5阶段监督微调（学推理方式）**
 
-**3.3 第二阶段监督微调（学习推理能力）**
+```bash
+# 基础训练命令（从预训练权重开始，全参数微调）
+python train_sft_vlm.py --epochs 2 --from_weight sft_vlm --data_path ../dataset/sft_i2t_cot_distilled.parquet --save_weight sft_vlm_cot
+```
+
+> 执行监督微调，得到 `sft_vlm_cot_*.pth` 作为指令微调的输出权重
+
+
+**3.3 第三阶段GRPO（增加准确率）**
 
 ```bash
 # 基础训练命令（从第一阶段微调权重开始，全参数微调）
-python train_cot_vlm.py --epochs 2 --from_weight sft_vlm
+python train_grpo_vlm.py 
+
 ```
 
 
@@ -131,15 +170,29 @@ python train_sft_vlm.py --epochs 4 --from_resume 1
 # 测试SFT模型（默认）
 python eval_vlm.py --weight sft_vlm
 
-# 测试Cot模型
-python eval_vlm.py --weight cot_vlm
-
 # 测试Pretrain模型
 python eval_vlm.py --weight pretrain_vlm
+
+# 测试RL模型
+python eval_vlm.py --weight grpo_vlm
+
+# 测试SFT CoT模型
+python eval_vlm.py --weight sft_vlm_cot
 
 ```
 
 # 📌 评估
+
+### 实验结果
+
+
+Pretrain [768+8] (dense)
+![image](./images/pretrain_reason_loss.png)
+
+
+SFT [768+8] (dense)
+![input](./images/sft_reason_loss.png)
+
 
 ### 效果测试
 
@@ -258,7 +311,3 @@ python eval_vlm.py --weight pretrain_vlm
 总体来说，回答更加简洁明了，对于图片中的主要内容提取能力更强了，但是还是有幻觉情况存在，并且推理能力由于数据集样本太小，训练也还暂时不够充分，推理能力还有很大上升空间。
 
 
-------------------
-缺陷不足：
-
-用这么小的模型来做推理，本身就具有一定局限性，另外数据集大小太小，模型可以用于学习推理的样本量太少了，可以选择下载大一点的数据集做训练和测试，效果会好很多。
