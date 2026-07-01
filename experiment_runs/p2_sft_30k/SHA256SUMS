@@ -1,0 +1,2 @@
+5fde0da185b43a290e2d6bc15752f2ae0a7d78760709c6005b2afd3852cfd170  out/sft_vlm_30k_768.pth
+687c89127d58422f3e7f8b1c50555d61aa58655e4f554fbea42f5fcdc82c66fe  checkpoints/sft_vlm_30k_768_resume.pth

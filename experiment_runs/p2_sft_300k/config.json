@@ -1,0 +1,20 @@
+{
+  "stage": "P2 General VLM-SFT 300K baseline",
+  "initial_weight": "out/pretrain_vlm_768.pth",
+  "dataset": "dataset/sft_i2t_300k.parquet",
+  "validation_dataset": "dataset/sft_i2t_val_1k.parquet",
+  "train_samples": 300000,
+  "epochs": 1,
+  "world_size": 4,
+  "batch_size_per_gpu": 4,
+  "gradient_accumulation": 4,
+  "effective_global_batch_size": 64,
+  "max_seq_len": 768,
+  "learning_rate": 0.000005,
+  "log_interval_micro_steps": 20,
+  "eval_interval_micro_steps": 500,
+  "eval_batches_per_rank": 16,
+  "freeze_strategy": "SigLIP frozen; LLM and Vision Projector trainable",
+  "nccl_p2p_disable": true,
+  "nccl_ib_disable": true
+}

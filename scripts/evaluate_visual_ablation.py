@@ -26,12 +26,14 @@ def main():
     parser.add_argument("--data_path", default=f"{PROJECT_DIR}/dataset/pretrain_i2t.parquet")
     parser.add_argument("--manifest", default=f"{PROJECT_DIR}/dataset/manifests/pretrain_validation_v1.jsonl")
     parser.add_argument("--samples", type=int, default=256)
+    parser.add_argument("--max_seq_len", type=int, default=360)
+    parser.add_argument("--sequential", action="store_true", help="Use the first N rows instead of a manifest")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--output", default=f"{PROJECT_DIR}/experiment_runs/p1_pretrain/visual_ablation.json")
     args = parser.parse_args()
 
-    config = build_vlm_config("reason_vlm_109m", 360, 0)
+    config = build_vlm_config("reason_vlm_109m", args.max_seq_len, 0)
     model, tokenizer, processor = init_vlm_model(
         config, from_weight=args.weight, device=args.device, freeze_llm=2
     )
@@ -44,8 +46,11 @@ def main():
         image_token_len=config.image_token_len,
         max_length=config.max_seq_len,
     )
-    with open(args.manifest, "r", encoding="utf-8") as file:
-        indices = [json.loads(line)["row_index"] for line in file if line.strip()][: args.samples]
+    if args.sequential:
+        indices = list(range(min(args.samples, len(dataset))))
+    else:
+        with open(args.manifest, "r", encoding="utf-8") as file:
+            indices = [json.loads(line)["row_index"] for line in file if line.strip()][: args.samples]
     loader = DataLoader(
         Subset(dataset, indices),
         batch_size=args.batch_size,

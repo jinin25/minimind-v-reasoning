@@ -22,10 +22,36 @@ from trainer.trainer_utils import PROJECT_DIR, get_lr, Logger, is_main_process, 
 warnings.filterwarnings('ignore')
 
 
-def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
+@torch.no_grad()
+def evaluate_validation(loader):
+    model.eval()
+    loss_sum = 0.0
+    sample_count = 0
+    for batch_index, (input_ids, labels, pixel_values) in enumerate(loader):
+        if args.eval_batches > 0 and batch_index >= args.eval_batches:
+            break
+        input_ids = input_ids.to(args.device)
+        labels = labels.to(args.device)
+        pixel_values = {k: v.to(args.device) for k, v in pixel_values.items()} if isinstance(pixel_values, dict) else pixel_values.to(args.device)
+        with autocast_ctx:
+            result = model(input_ids, labels=labels, pixel_values=pixel_values)
+            batch_loss = result.loss + result.aux_loss
+        batch_size = input_ids.size(0)
+        loss_sum += float(batch_loss) * batch_size
+        sample_count += batch_size
+    stats = torch.tensor([loss_sum, sample_count], dtype=torch.float64, device=args.device)
+    if dist.is_initialized():
+        dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+    model.train()
+    return float(stats[0] / stats[1])
+
+
+def train_epoch(epoch, loader, iters, start_step=0, wandb=None, val_loader=None):
     start_time = time.time()
     interval_time = start_time
     interval_samples = 0
+    interval_loss_sum = 0.0
+    interval_batches = 0
     grad_norm = 0.0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     for local_step, (input_ids, labels, pixel_values) in enumerate(loader):
@@ -38,15 +64,19 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
-        with autocast_ctx:
-            res = model(input_ids, labels=labels, pixel_values=pixel_values)
-            loss = res.loss + res.aux_loss
-            loss = loss / args.accumulation_steps
-
-        scaler.scale(loss).backward()
+        update_now = completed_step % args.accumulation_steps == 0 or completed_step == iters
+        sync_ctx = model.no_sync() if isinstance(model, DistributedDataParallel) and not update_now else nullcontext()
+        with sync_ctx:
+            with autocast_ctx:
+                res = model(input_ids, labels=labels, pixel_values=pixel_values)
+                batch_loss = res.loss + res.aux_loss
+                loss = batch_loss / args.accumulation_steps
+            scaler.scale(loss).backward()
 
         interval_samples += input_ids.size(0) * world_size
-        if completed_step % args.accumulation_steps == 0:
+        interval_loss_sum += float(batch_loss.detach())
+        interval_batches += 1
+        if update_now:
             scaler.unscale_(optimizer)
             grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip))
 
@@ -58,7 +88,10 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         reached_limit = args.max_steps > 0 and completed_step >= args.max_steps
         if completed_step % args.log_interval == 0 or completed_step == iters or reached_limit:
             spend_time = time.time() - start_time
-            current_loss = loss.item() * args.accumulation_steps
+            loss_stats = torch.tensor([interval_loss_sum, interval_batches], dtype=torch.float64, device=args.device)
+            if dist.is_initialized():
+                dist.all_reduce(loss_stats, op=dist.ReduceOp.SUM)
+            current_loss = float(loss_stats[0] / loss_stats[1])
             current_aux_loss = res.aux_loss.item() if res.aux_loss is not None else 0.0
             current_logits_loss = current_loss - current_aux_loss
             current_lr = optimizer.param_groups[-1]['lr']
@@ -70,6 +103,13 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             if wandb: wandb.log({"loss": current_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "grad_norm": grad_norm, "throughput_samples_per_second": samples_per_second, "peak_gpu_memory_gb": memory_gb, "global_step": completed_step})
             interval_time = time.time()
             interval_samples = 0
+            interval_loss_sum = 0.0
+            interval_batches = 0
+
+        if val_loader is not None and args.eval_interval > 0 and completed_step % args.eval_interval == 0:
+            validation_loss = evaluate_validation(val_loader)
+            Logger(f'Validation step {completed_step}: loss={validation_loss:.4f}')
+            if wandb: wandb.log({"validation_loss": validation_loss, "global_step": completed_step})
 
         if (completed_step % args.save_interval == 0 or completed_step == iters or reached_limit) and is_main_process():
             model.eval()
@@ -112,6 +152,9 @@ if __name__ == "__main__":
     parser.add_argument("--save_interval", type=int, default=1000, help="模型保存间隔")
     parser.add_argument("--max_steps", type=int, default=-1, help="最多训练多少个batch；-1表示完整epoch")
     parser.add_argument("--checkpoint_dir", type=str, default=os.path.join(PROJECT_DIR, "checkpoints"), help="断点目录")
+    parser.add_argument("--val_data_path", type=str, default="", help="固定验证集parquet")
+    parser.add_argument("--eval_interval", type=int, default=500, help="每隔多少个micro-step验证；0关闭")
+    parser.add_argument("--eval_batches", type=int, default=16, help="每次每个rank最多验证多少个batch；-1表示全量")
     parser.add_argument('--max_seq_len', default=768, type=int, help="训练的最大截断长度")
     parser.add_argument('--use_moe', default=0, type=int, choices=[0, 1], help="是否使用MoE架构（0=否，1=是）")
     parser.add_argument("--data_path", type=str, default=os.path.join(PROJECT_DIR, "dataset", "sft_i2t.parquet"), help="训练数据路径")
@@ -156,6 +199,20 @@ if __name__ == "__main__":
         cot_trim_ratio=args.cot_trim_ratio,
     )
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
+    val_loader = None
+    if args.val_data_path:
+        val_ds = VLMDataset(
+            args.val_data_path,
+            tokenizer,
+            preprocess=preprocess,
+            image_special_token=vlm_config.image_special_token,
+            image_token_len=vlm_config.image_token_len,
+            max_length=vlm_config.max_seq_len,
+            enable_augmentation=False,
+        )
+        val_sampler = DistributedSampler(val_ds, shuffle=False) if dist.is_initialized() else None
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, sampler=val_sampler, shuffle=False,
+                                num_workers=0, pin_memory=True, collate_fn=vlm_collate_fn)
     scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == 'float16'))
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
 
@@ -192,9 +249,9 @@ if __name__ == "__main__":
         loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True, collate_fn=vlm_collate_fn)
         if skip > 0:
             Logger(f'Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step，从step {start_step + 1}开始')
-            stopped = train_epoch(epoch, loader, len(loader) + skip, start_step, wandb)
+            stopped = train_epoch(epoch, loader, len(loader) + skip, start_step, wandb, val_loader)
         else:
-            stopped = train_epoch(epoch, loader, len(loader), 0, wandb)
+            stopped = train_epoch(epoch, loader, len(loader), 0, wandb, val_loader)
         if stopped:
             break
 

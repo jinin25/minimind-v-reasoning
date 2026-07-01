@@ -81,7 +81,8 @@ def post_processing_chat(prompt_content, empty_think_ratio=0.2, cot_trim_ratio=0
 class VLMDataset(Dataset):
     def __init__(self, parquet_path, tokenizer, preprocess=None, max_length=512,
                  image_special_token='<|image_pad|>', image_token_len=64,
-                 reasoning_drop_ratio=0.0, cot_trim_ratio=0.0):
+                 reasoning_drop_ratio=0.0, cot_trim_ratio=0.0,
+                 enable_augmentation=True):
         super().__init__()
         self.table = pa.Table.from_batches(pq.ParquetFile(parquet_path).iter_batches())
         self.tokenizer = tokenizer
@@ -90,6 +91,7 @@ class VLMDataset(Dataset):
         self.image_special_token = image_special_token * image_token_len
         self.reasoning_drop_ratio = float(reasoning_drop_ratio)
         self.cot_trim_ratio = float(cot_trim_ratio)
+        self.enable_augmentation = bool(enable_augmentation)
         self.bos_id = tokenizer(f'{tokenizer.bos_token}assistant\n', add_special_tokens=False).input_ids
         self.eos_id = tokenizer(f'{tokenizer.eos_token}\n', add_special_tokens=False).input_ids
 
@@ -132,13 +134,15 @@ class VLMDataset(Dataset):
         image_bytes = self.table['image_bytes'][index].as_py()
         if not isinstance(image_bytes, list): image_bytes = [image_bytes]
 
-        conversations = pre_processing_chat(conversations)
+        if self.enable_augmentation:
+            conversations = pre_processing_chat(conversations)
         prompt = self.create_chat_prompt(conversations)
-        prompt = post_processing_chat(
-            prompt,
-            reasoning_drop_ratio=self.reasoning_drop_ratio,
-            cot_trim_ratio=self.cot_trim_ratio,
-        )
+        if self.enable_augmentation:
+            prompt = post_processing_chat(
+                prompt,
+                reasoning_drop_ratio=self.reasoning_drop_ratio,
+                cot_trim_ratio=self.cot_trim_ratio,
+            )
         input_ids = self.tokenizer(prompt).input_ids[:self.max_length]
         input_ids += [self.tokenizer.pad_token_id] * (self.max_length - len(input_ids))
         labels = self.generate_labels(input_ids)
