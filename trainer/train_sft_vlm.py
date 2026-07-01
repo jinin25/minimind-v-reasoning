@@ -140,14 +140,8 @@ if __name__ == "__main__":
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
     autocast_ctx = nullcontext() if device_type == "cpu" else torch.cuda.amp.autocast(dtype=dtype)
 
-    # ========== 4. 配wandb ==========
+    # SwanLab必须在DDP完成全部collective之后初始化。
     wandb = None
-    if args.use_swanlab and is_main_process():
-        import swanlab as wandb
-        wandb_id = ckp_data.get('wandb_id') if ckp_data else None
-        resume = 'must' if wandb_id else None
-        wandb_run_name = f"MiniMind-V-SFT-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LearningRate-{args.learning_rate}"
-        wandb.init(project=args.swanlab_project, name=wandb_run_name, id=wandb_id, resume=resume)
 
     # ========== 5. 定义模型、数据、优化器 ==========
     model, tokenizer, preprocess = init_vlm_model(vlm_config, from_weight=args.from_weight, device=args.device, freeze_llm=args.freeze_llm)
@@ -179,8 +173,15 @@ if __name__ == "__main__":
         model = torch.compile(model)
         Logger('torch.compile enabled')
     if dist.is_initialized():
+        dist.barrier(device_ids=[local_rank])
         model._ddp_params_and_buffers_to_ignore = {"freqs_cos", "freqs_sin"}
         model = DistributedDataParallel(model, device_ids=[local_rank])
+    if args.use_swanlab and is_main_process():
+        import swanlab as wandb
+        wandb_id = ckp_data.get('wandb_id') if ckp_data else None
+        resume = 'must' if wandb_id else None
+        wandb_run_name = f"MiniMind-V-SFT-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LearningRate-{args.learning_rate}"
+        wandb.init(project=args.swanlab_project, name=wandb_run_name, id=wandb_id, resume=resume)
 
     # ========== 8. 开始训练 ==========
     for epoch in range(start_epoch, args.epochs):

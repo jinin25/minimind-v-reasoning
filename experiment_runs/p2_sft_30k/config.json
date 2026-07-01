@@ -1,0 +1,15 @@
+{
+  "stage": "P2 General VLM-SFT 30K smoke",
+  "initial_weight": "out/pretrain_vlm_768.pth",
+  "dataset": "dataset/sft_i2t_30k.parquet",
+  "train_samples": 30000,
+  "epochs": 1,
+  "world_size": 4,
+  "batch_size_per_gpu": 4,
+  "global_batch_size": 16,
+  "max_seq_len": 768,
+  "learning_rate": 0.000005,
+  "freeze_strategy": "SigLIP frozen; LLM and Vision Projector trainable",
+  "nccl_p2p_disable": true,
+  "nccl_ib_disable": true
+}
