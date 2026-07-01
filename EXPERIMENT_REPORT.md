@@ -8,7 +8,7 @@
 |---|---|---|---|
 | E1 | CoT数据蒸馏 | 四卡异步教师生成 | 已完成 |
 | E2 | CoT质量清洗 | 是否过滤模板化元推理 | 已完成 |
-| E3 | Multimodal Pretrain | 真实图像 vs 全零图像 | 运行中 |
+| E3 | Multimodal Pretrain | 真实图像 vs 全零图像 vs 错配图像 | 已完成 |
 | E4 | General VLM-SFT | 30–60万分层数据 vs 全量数据 | 待实验 |
 | E5 | CoT-SFT | 无CoT vs CoT；Dropout 0 vs 0.2 | 待实验 |
 | E6 | Rule-based GRPO | SFT策略 vs GRPO策略 | 待实验 |
@@ -90,7 +90,25 @@
 | Epoch | 1 |
 | Learning rate | 4e-4 |
 
-### 消融设计
+### 训练结果
+
+![Multimodal Pretrain loss curve](./experiment_runs/p1_pretrain/loss_curve.png)
+
+| 指标 | 结果 |
+|---|---:|
+| Steps | 39,803 / 39,803 |
+| Wall time | 1小时53分25秒 |
+| 日志点 | 797 |
+| 首个记录loss | 6.0462 |
+| 最后记录loss | 3.1847 |
+| 最后20点平均loss | 2.8587 |
+| 最低记录loss | 2.1931 |
+| 平均吞吐 | 189.45 samples/s |
+| 峰值显存 | 2.44 GB/卡 |
+
+曲线前期快速下降，约15k step后进入缓慢下降平台；后期batch波动存在，但移动平均没有反弹或发散。
+
+### 视觉消融
 
 在相同的256条固定验证样本上比较：
 
@@ -98,8 +116,24 @@
 |---|---|
 | Real Image | 原始图像 |
 | Zero Image | shape相同的全零图像 |
+| Shuffled Image | batch内循环错配的真实图像 |
 
-若Zero Image loss显著高于Real Image，说明训练后的预测依赖视觉信号。正式结果由后台训练结束后写入本节。
+| 条件 | Validation loss | 相对Real Image变化 |
+|---|---:|---:|
+| Real Image | 3.0470 | - |
+| Zero Image | 3.7419 | +0.6949（+22.81%） |
+| Shuffled Image | 3.6754 | +0.6284（+20.62%） |
+
+### 结论
+
+置空图和错配图均显著提高loss。错配图仍来自真实图像分布，因此结果不只是“全零像素异常”造成的惩罚，而表明模型利用了与文本匹配的视觉语义。该实验验证了视觉语言对齐，但不能替代SFT后的VQA/OCR/计数准确率评测。
+
+### 产物
+
+- 权重：`out/pretrain_vlm_768.pth`
+- 权重SHA-256：`91a39c0b651ab6f5a7e89f4c9979d3a38f0250898d99c19a748444531d3493a4`
+- Resume checkpoint：`checkpoints/pretrain_vlm_768_resume.pth`
+- Resume SHA-256：`71622af1f87180b96de9f95fb880b31bec9638510d802a135fcee18daca47681`
 
 ## 5. E4：General VLM-SFT
 
@@ -130,7 +164,7 @@
 | 模型阶段 | 普通VQA | OCR | 计数 | 推理准确率 | 置空下降 | 格式合规率 |
 |---|---:|---:|---:|---:|---:|---:|
 | Reason LLM | 待测 | 待测 | 待测 | 待测 | - | 待测 |
-| + Pretrain | 运行中 | 运行中 | 运行中 | - | 运行中 | - |
+| + Pretrain | SFT后评测 | SFT后评测 | SFT后评测 | - | loss +20.62% | - |
 | + General SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
 | + CoT-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
 | + Reasoning Dropout | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |

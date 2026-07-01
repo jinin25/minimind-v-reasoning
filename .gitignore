@@ -17,5 +17,6 @@ model/siglip2-base-p32-256-ve/
 out/
 checkpoints/
 artifacts/
+experiment_runs/*/STATUS
 
 vocab.json

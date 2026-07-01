@@ -11,23 +11,28 @@
 
 验收结果：无NaN、无DDP hang；DistributedSampler按rank分片；resume后step、loss与SwanLab run连续。稳态吞吐约360 samples/s，峰值显存2.42 GB/卡。
 
-## Phase 1：Multimodal Pretrain
+## Phase 1：Multimodal Pretrain（已完成）
 
-- 初始化：`reason_768.pth`
-- 冻结：SigLIP
-- 训练：Vision Projector + LLM第0层
-- 数据：1,274,698条Pretrain
-- 初始计划：1 epoch，max length 360
+- [x] 从`reason_768.pth`初始化
+- [x] 冻结SigLIP，训练Vision Projector + LLM第0层
+- [x] 1,273,674条训练样本，1 epoch，max length 360
+- [x] 保存权重、resume checkpoint、配置与SHA-256
+- [x] Real / Zero / Shuffled Image消融
+- [x] 生成loss曲线
 
-验收：验证loss下降；真实图片优于空图；权重可独立加载。
+验收结果：训练loss稳定下降；Real Image loss 3.0470，Zero 3.7419，Shuffled 3.6754；权重已严格加载并完成消融。
 
-## Phase 2：General VLM-SFT
+## Phase 2：General VLM-SFT（下一阶段）
 
-- 从2.9M原始SFT中确定性分层抽样30–60万条
-- 训练LLM + Projector，冻结SigLIP
-- 1 epoch，max length 768
+- [ ] 建立固定SFT验证集，按语言和任务类型统计分布
+- [ ] 生成30K工程冒烟集、300K主实验集和600K规模消融集
+- [ ] 将Pretrain的DDP屏障与NCCL稳定配置复用到SFT
+- [ ] 30K只做短程稳定性、过拟合和评测链路检查，不作为正式结果
+- [ ] SFT-300K：正式基线，1 epoch，max length 768
+- [ ] SFT-600K：仅在300K指标有效后运行，用于数据规模消融
+- [ ] SFT-Full：仅在600K继续显著优于300K时，作为最终上限实验
 
-验收：视觉描述、OCR、计数和短问答均优于Pretrain模型。
+验收：视觉描述、OCR、计数和短问答可正常生成；Real Image优于Zero/Shuffled；300K相对Pretrain取得明确收益。
 
 ## Phase 3：CoT-SFT
 

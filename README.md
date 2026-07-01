@@ -124,16 +124,33 @@ flowchart LR
 - SigLIP P32单图forward/backward通过
 - Vision Projector梯度非零
 
+### Multimodal Pretrain
+
+| 指标 | 结果 |
+|---|---:|
+| 训练数据 | 1,273,674 |
+| 固定验证集 | 1,024 |
+| 训练步数 | 39,803 |
+| 训练耗时 | 1小时53分 |
+| 日志首点 / 末点loss | 6.046 / 3.185 |
+| 最后20点平均loss | 2.859 |
+| 峰值显存 | 2.44 GB/卡 |
+| Real-image validation loss | 3.0470 |
+| Zero-image validation loss | 3.7419 |
+| Shuffled-image validation loss | 3.6754 |
+
+真实图像的验证loss明显低于置空图和错配图，说明模型不仅接收到了视觉信号，也在使用与文本匹配的图像语义。
+
 详细记录见 [EXPERIMENT_REPORT.md](./EXPERIMENT_REPORT.md)，后续安排见 [EXPERIMENT_PLAN.md](./EXPERIMENT_PLAN.md)。
 
 ## 当前效果
 
-当前已完成数据工程、模型兼容和单图训练链路验证，正式多阶段训练尚未开始。以下指标将在固定验证集上逐阶段补充：
+当前已完成CoT数据工程和一轮Multimodal Pretrain。以下任务指标将在General SFT后于固定评测集上逐阶段补充：
 
 | 模型阶段 | 普通VQA | OCR | 计数 | 可验证推理 | 格式合规率 |
 |---|---:|---:|---:|---:|---:|
 | Reason LLM（无视觉） | - | - | - | 待测 | 待测 |
-| Multimodal Pretrain | 待实验 | 待实验 | 待实验 | - | - |
+| Multimodal Pretrain | 尚不适合生成式评测 | 尚不适合生成式评测 | 尚不适合生成式评测 | - | - |
 | General VLM-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
 | CoT-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
 | CoT-SFT + GRPO | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |

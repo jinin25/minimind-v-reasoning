@@ -55,7 +55,7 @@ def main():
         collate_fn=vlm_collate_fn,
     )
 
-    real_total = zero_total = 0.0
+    real_total = zero_total = shuffled_total = 0.0
     seen = 0
     with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
         for input_ids, labels, pixel_values in loader:
@@ -63,19 +63,25 @@ def main():
             labels = labels.to(args.device)
             pixel_values = move_pixels(pixel_values, args.device)
             zeros = {key: torch.zeros_like(value) for key, value in pixel_values.items()}
+            shuffled = {key: torch.roll(value, shifts=1, dims=0) for key, value in pixel_values.items()}
             real_loss = model(input_ids, labels=labels, pixel_values=pixel_values).loss
             zero_loss = model(input_ids, labels=labels, pixel_values=zeros).loss
+            shuffled_loss = model(input_ids, labels=labels, pixel_values=shuffled).loss
             batch = input_ids.size(0)
             real_total += real_loss.item() * batch
             zero_total += zero_loss.item() * batch
+            shuffled_total += shuffled_loss.item() * batch
             seen += batch
 
     result = {
         "samples": seen,
         "real_image_loss": real_total / seen,
         "zero_image_loss": zero_total / seen,
+        "shuffled_image_loss": shuffled_total / seen,
         "zero_minus_real": (zero_total - real_total) / seen,
+        "shuffled_minus_real": (shuffled_total - real_total) / seen,
         "uses_visual_signal": zero_total > real_total,
+        "uses_matched_visual_semantics": shuffled_total > real_total,
     }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
