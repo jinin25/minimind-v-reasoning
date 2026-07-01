@@ -162,4 +162,38 @@
 
 ## 8. 当前结论与限制
 
-训练前的权重、数据、视觉链路和监控资产已经到位。尚不能给出最终模型效果结论，因为固定验证集、四卡100-step测试和正式训练尚未完成。下一轮实验应优先建立评测基线，而不是立即开始长时间训练。
+训练前的权重、数据、视觉链路、固定验证集和监控资产已经到位。P0已通过，可以进入正式Pretrain；最终模型效果仍须由后续阶段实验给出。
+
+## 9. P0训练前验收结果
+
+| 项目 | 结果 |
+|---|---|
+| Pretrain schema / rows | `conversations:string, image_bytes:binary` / 1,274,698 |
+| 图片审计 | 固定种子抽检10,000条，10,000条有效 |
+| 固定验证集 | 1,024条，已从训练集排除 |
+| Manifest SHA-256 | `731b68234ab6c926cb2629812337abff501e581aa44d2ff34e4a437366619f695` |
+| 单图测试 | loss 11.769444；projector grad norm 6.306393 |
+| 4卡DDP | 50步停止，恢复至100步，无hang或NaN |
+| Pretrain稳态吞吐 | 约359–363 samples/s |
+| Pretrain峰值显存 | 2.42 GB/卡，batch size 8/卡，seq 360 |
+| SFT稳态吞吐 | 约94–95 samples/s |
+| SFT峰值显存 | 4.18 GB/卡，batch size 4/卡，seq 768 |
+| SwanLab | 账号`jinin25`；同一run ID完成续训 |
+
+### 一轮训练耗时估算
+
+以下由4×A10短基准线性外推，未包含初始化、周期评估和大checkpoint上传时间：
+
+| 实验 | 数据规模 | 预计耗时 |
+|---|---:|---:|
+| Multimodal Pretrain 1 epoch | 1,273,674条训练样本 | 约1.0小时 |
+| General SFT 30万条 | 300,000 | 约0.9小时 |
+| General SFT 60万条 | 600,000 | 约1.8小时 |
+| General SFT全量1 epoch | 2,904,511 | 约8.5小时 |
+| CoT-SFT 1 epoch | 186,094 + 普通SFT混合 | 约0.7–1.0小时 |
+| CoT-SFT两组×2 epochs | Dropout 0 / 0.2 | 约3–4小时 |
+| GRPO G0 | 1,000 prompts | 约0.5–1.5小时，需实测rollout |
+| GRPO G1 | 5,000 prompts | 约2.5–7.5小时，需实测rollout |
+| GRPO G2 | 10,000–20,000 prompts | 约5–30小时，取决于生成长度 |
+
+Pretrain与SFT各做1 epoch在4×A10上可行。若General SFT目标是验证研究方案，优先使用30–60万确定性分层样本；全量1 epoch虽然能在约一个工作日内完成，但实验迭代成本高且边际收益尚未验证。

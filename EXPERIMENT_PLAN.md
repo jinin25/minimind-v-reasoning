@@ -1,15 +1,15 @@
 # MiniMind-V-Reasoning Experiment Plan
 
-## Phase 0：训练前验收
+## Phase 0：训练前验收（已完成）
 
-- 全量或大样本检查Pretrain图片有效率
-- 固定验证集与样本ID
-- 给Pretrain/SFT增加`--max_steps`
-- 记录gradient norm、吞吐与显存
-- 4卡DDP运行100 step
-- 验证checkpoint中断恢复一致性
+- [x] 抽检10,000条Pretrain图片，全部可解码
+- [x] 固定1,024条验证样本及SHA-256样本ID，并从训练集排除
+- [x] 给Pretrain/SFT增加`--max_steps`
+- [x] 记录gradient norm、吞吐与显存
+- [x] 4卡DDP运行100 step
+- [x] 验证checkpoint在第50步停止并从第51步恢复到第100步
 
-验收：无NaN、无DDP hang、四卡数据不重复、resume后step与loss连续。
+验收结果：无NaN、无DDP hang；DistributedSampler按rank分片；resume后step、loss与SwanLab run连续。稳态吞吐约360 samples/s，峰值显存2.42 GB/卡。
 
 ## Phase 1：Multimodal Pretrain
 

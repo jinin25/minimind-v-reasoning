@@ -1,0 +1,15 @@
+{
+  "data_path": "/home/data/lilab06/wj/minimind-v-reasoning/dataset/pretrain_i2t.parquet",
+  "schema": "conversations: string\nimage_bytes: binary",
+  "rows": 1274698,
+  "row_groups": 255,
+  "audit_seed": 20260701,
+  "audit_samples": 10000,
+  "valid_samples": 10000,
+  "invalid_samples": 0,
+  "estimated_valid_rate": 1.0,
+  "invalid_examples": [],
+  "validation_samples": 1024,
+  "validation_manifest": "dataset/manifests/pretrain_validation_v1.jsonl",
+  "manifest_sha256": "731b68234ab6c926cb2629812337abff501e581aa44d2ff34e4a43736619f695"
+}

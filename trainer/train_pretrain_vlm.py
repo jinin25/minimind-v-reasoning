@@ -12,19 +12,25 @@ import torch.distributed as dist
 from contextlib import nullcontext
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, Subset
 from transformers import AutoTokenizer
 from model.model_vlm import MiniMindVLM, VLMConfig
 from model.model_profiles import add_model_profile_argument, build_vlm_config
 from dataset.lm_dataset import VLMDataset
-from trainer.trainer_utils import get_lr, Logger, is_main_process, init_distributed_mode, setup_seed, init_vlm_model, vlm_checkpoint, SkipBatchSampler, vlm_collate_fn
+from trainer.trainer_utils import PROJECT_DIR, get_lr, Logger, is_main_process, init_distributed_mode, setup_seed, init_vlm_model, vlm_checkpoint, SkipBatchSampler, vlm_collate_fn
 
 warnings.filterwarnings('ignore')
 
 
 def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
     start_time = time.time()
-    for step, (input_ids, labels, pixel_values) in enumerate(loader, start=start_step + 1):
+    interval_time = start_time
+    interval_samples = 0
+    grad_norm = 0.0
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
+    for local_step, (input_ids, labels, pixel_values) in enumerate(loader):
+        step = start_step + local_step
+        completed_step = step + 1
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
         pixel_values = {k: v.to(args.device) for k, v in pixel_values.items()} if isinstance(pixel_values, dict) else pixel_values.to(args.device)
@@ -39,26 +45,33 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
 
         scaler.scale(loss).backward()
 
-        if (step + 1) % args.accumulation_steps == 0:
+        interval_samples += input_ids.size(0) * world_size
+        if completed_step % args.accumulation_steps == 0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip))
 
             scaler.step(optimizer)
             scaler.update()
 
             optimizer.zero_grad(set_to_none=True)
 
-        if step % args.log_interval == 0 or step == iters - 1:
+        reached_limit = args.max_steps > 0 and completed_step >= args.max_steps
+        if completed_step % args.log_interval == 0 or completed_step == iters or reached_limit:
             spend_time = time.time() - start_time
+            interval_elapsed = max(time.time() - interval_time, 1e-6)
+            samples_per_second = interval_samples / interval_elapsed
+            memory_gb = torch.cuda.max_memory_allocated(args.device) / 1024 ** 3 if torch.cuda.is_available() else 0.0
             current_loss = loss.item() * args.accumulation_steps
             current_aux_loss = res.aux_loss.item() if res.aux_loss is not None else 0.0
             current_logits_loss = current_loss - current_aux_loss
             current_lr = optimizer.param_groups[-1]['lr']
-            eta_min = spend_time / (step + 1) * iters // 60 - spend_time // 60
-            Logger(f'Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}), loss: {current_loss:.4f}, logits_loss: {current_logits_loss:.4f}, aux_loss: {current_aux_loss:.4f}, lr: {current_lr:.8f}, epoch_time: {eta_min:.1f}min')
-            if wandb: wandb.log({"loss": current_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "epoch_time": eta_min})
+            eta_min = spend_time / completed_step * max(iters - completed_step, 0) / 60
+            Logger(f'Epoch:[{epoch + 1}/{args.epochs}]({completed_step}/{iters}), loss: {current_loss:.4f}, logits_loss: {current_logits_loss:.4f}, aux_loss: {current_aux_loss:.4f}, lr: {current_lr:.8f}, grad_norm: {grad_norm:.3f}, throughput: {samples_per_second:.2f} samples/s, peak_memory: {memory_gb:.2f} GB, eta: {eta_min:.1f}min')
+            if wandb: wandb.log({"loss": current_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "grad_norm": grad_norm, "throughput_samples_per_second": samples_per_second, "peak_gpu_memory_gb": memory_gb, "global_step": completed_step})
+            interval_time = time.time()
+            interval_samples = 0
 
-        if (step % args.save_interval == 0 or step == iters - 1) and is_main_process():
+        if (completed_step % args.save_interval == 0 or completed_step == iters or reached_limit) and is_main_process():
             model.eval()
             moe_suffix = '_moe' if vlm_config.use_moe else ''
             ckp = f'{args.save_dir}/{args.save_weight}_{vlm_config.hidden_size}{moe_suffix}.pth'
@@ -71,17 +84,21 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
             clean_state_dict = {k: v.half().cpu() for k, v in clean_state_dict.items()}  # 半精度保存并移到CPU
             torch.save(clean_state_dict, ckp)
             vlm_checkpoint(vlm_config, weight=args.save_weight, model=model, optimizer=optimizer,
-                         epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints', scaler=scaler)
+                         epoch=epoch, step=completed_step, wandb=wandb, save_dir=args.checkpoint_dir, scaler=scaler)
             model.train()
             del state_dict, clean_state_dict
 
         del input_ids, labels, pixel_values, res, loss
+        if reached_limit:
+            Logger(f'Reached --max_steps={args.max_steps}, stopping cleanly.')
+            return True
+    return False
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MiniMind-V Pretrain")
     add_model_profile_argument(parser)
-    parser.add_argument("--save_dir", type=str, default="../out", help="模型保存目录")
+    parser.add_argument("--save_dir", type=str, default=os.path.join(PROJECT_DIR, "out"), help="模型保存目录")
     parser.add_argument('--save_weight', default='pretrain_vlm', type=str, help="保存权重的前缀名")
     parser.add_argument("--epochs", type=int, default=3, help="训练轮数")
     parser.add_argument("--batch_size", type=int, default=16, help="batch size")
@@ -93,9 +110,12 @@ if __name__ == "__main__":
     parser.add_argument("--grad_clip", type=float, default=1.0, help="梯度裁剪阈值")
     parser.add_argument("--log_interval", type=int, default=100, help="日志打印间隔")
     parser.add_argument("--save_interval", type=int, default=1000, help="模型保存间隔")
+    parser.add_argument("--max_steps", type=int, default=-1, help="最多训练多少个batch；-1表示完整epoch")
+    parser.add_argument("--checkpoint_dir", type=str, default=os.path.join(PROJECT_DIR, "checkpoints"), help="断点目录")
     parser.add_argument('--max_seq_len', default=360, type=int, help="训练的最大截断长度")
     parser.add_argument('--use_moe', default=0, type=int, choices=[0, 1], help="是否使用MoE架构（0=否，1=是）")
-    parser.add_argument("--data_path", type=str, default="../dataset/pretrain_i2t.parquet", help="训练数据路径")
+    parser.add_argument("--data_path", type=str, default=os.path.join(PROJECT_DIR, "dataset", "pretrain_i2t.parquet"), help="训练数据路径")
+    parser.add_argument("--validation_manifest", type=str, default=os.path.join(PROJECT_DIR, "dataset", "manifests", "pretrain_validation_v1.jsonl"), help="固定验证集manifest；其中样本会从训练集排除")
     parser.add_argument('--from_weight', default='reason', type=str, help="out目录中的初始化权重前缀")
     parser.add_argument('--from_resume', default=0, type=int, choices=[0, 1], help="是否自动检测&续训（0=否，1=是）")
     parser.add_argument('--freeze_llm', default=1, type=int, choices=[0, 1, 2], help="冻结策略（0=完全可训练，1=冻结+解冻第0层，2=完全冻结仅训练proj）")
@@ -112,7 +132,7 @@ if __name__ == "__main__":
     # ========== 2. 配置目录、模型参数、检查ckp ==========
     os.makedirs(args.save_dir, exist_ok=True)
     vlm_config = build_vlm_config(args.model_profile, args.max_seq_len, args.use_moe)
-    ckp_data = vlm_checkpoint(vlm_config, weight=args.save_weight, save_dir='../checkpoints') if args.from_resume==1 else None
+    ckp_data = vlm_checkpoint(vlm_config, weight=args.save_weight, save_dir=args.checkpoint_dir) if args.from_resume==1 else None
 
     # ========== 3. 设置混合精度 ==========
     device_type = "cuda" if "cuda" in args.device else "cpu"
@@ -130,7 +150,14 @@ if __name__ == "__main__":
 
     # ========== 5. 定义模型、数据、优化器 ==========
     model, tokenizer, preprocess = init_vlm_model(vlm_config, from_weight=args.from_weight, device=args.device, freeze_llm=args.freeze_llm)
-    train_ds = VLMDataset(args.data_path, tokenizer, preprocess=preprocess, image_special_token=vlm_config.image_special_token, image_token_len=vlm_config.image_token_len, max_length=vlm_config.max_seq_len)
+    full_ds = VLMDataset(args.data_path, tokenizer, preprocess=preprocess, image_special_token=vlm_config.image_special_token, image_token_len=vlm_config.image_token_len, max_length=vlm_config.max_seq_len)
+    validation_indices = set()
+    if args.validation_manifest and os.path.exists(args.validation_manifest):
+        import json
+        with open(args.validation_manifest, "r", encoding="utf-8") as file:
+            validation_indices = {json.loads(line)["row_index"] for line in file if line.strip()}
+    train_ds = Subset(full_ds, [index for index in range(len(full_ds)) if index not in validation_indices])
+    Logger(f"Dataset split: train={len(train_ds):,}, fixed_validation={len(validation_indices):,}")
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
     scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == 'float16'))
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
@@ -161,9 +188,11 @@ if __name__ == "__main__":
         loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True, collate_fn=vlm_collate_fn)
         if skip > 0:
             Logger(f'Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step，从step {start_step + 1}开始')
-            train_epoch(epoch, loader, len(loader) + skip, start_step, wandb)
+            stopped = train_epoch(epoch, loader, len(loader) + skip, start_step, wandb)
         else:
-            train_epoch(epoch, loader, len(loader), 0, wandb)
+            stopped = train_epoch(epoch, loader, len(loader), 0, wandb)
+        if stopped:
+            break
 
     # ========== 9. 清理分布进程 ==========
     if dist.is_initialized(): dist.destroy_process_group()
