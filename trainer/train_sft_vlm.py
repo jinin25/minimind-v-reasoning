@@ -232,7 +232,11 @@ if __name__ == "__main__":
     if dist.is_initialized():
         dist.barrier(device_ids=[local_rank])
         model._ddp_params_and_buffers_to_ignore = {"freqs_cos", "freqs_sin"}
-        model = DistributedDataParallel(model, device_ids=[local_rank])
+        model = DistributedDataParallel(
+            model,
+            device_ids=[local_rank],
+            find_unused_parameters=True,
+        )
     if args.use_swanlab and is_main_process():
         import swanlab as wandb
         wandb_id = ckp_data.get('wandb_id') if ckp_data else None
