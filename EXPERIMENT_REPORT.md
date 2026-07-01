@@ -1,28 +1,32 @@
 # MiniMind-V-Reasoning Experiment Report
 
-## 1. 报告状态
+本文只记录影响模型能力结论的主要实验与消融。环境校准、脚本修复、路径调整和冒烟测试不作为独立实验。
 
-- 项目阶段：训练前工程验证完成
-- 当前主线：`reason_vlm_109m`
-- 正式Pretrain/SFT/GRPO：尚未开始
-- 硬件：4×NVIDIA A10 24GB
-- 监控：SwanLab 0.7.20，已登录
+## 1. 实验总览
 
-## 2. 实验一：CoT蒸馏吞吐优化
+| 编号 | 实验 | 核心变量 | 状态 |
+|---|---|---|---|
+| E1 | CoT数据蒸馏 | 四卡异步教师生成 | 已完成 |
+| E2 | CoT质量清洗 | 是否过滤模板化元推理 | 已完成 |
+| E3 | Multimodal Pretrain | 真实图像 vs 全零图像 | 运行中 |
+| E4 | General VLM-SFT | 30–60万分层数据 vs 全量数据 | 待实验 |
+| E5 | CoT-SFT | 无CoT vs CoT；Dropout 0 vs 0.2 | 待实验 |
+| E6 | Rule-based GRPO | SFT策略 vs GRPO策略 | 待实验 |
+
+## 2. E1：CoT数据蒸馏
 
 ### 目的
 
-从大规模图文SFT数据构造一句式结构化CoT，同时将任务控制在约10小时内。
+从大规模图文SFT数据构造一句式结构化CoT，并将蒸馏控制在单机4卡约10小时内。
 
 ### 方法
 
 - 教师：Qwen2.5-VL-7B-Instruct
 - 部署：4张A10各运行一个vLLM实例
 - 数据：确定性哈希抽样
-- 请求：每实例异步并发
-- 输出：教师只生成think，answer使用原始已验证答案
-- 容错：每500条保存Parquet分片和source index checkpoint
-- 质量规则：格式、占位文本和语言一致性校验
+- 输出：教师生成`<think>`，`<answer>`沿用原始答案
+- 容错：每500条写Parquet分片和checkpoint
+- 约束：推理语言与原始问答语言一致
 
 ### 结果
 
@@ -36,164 +40,98 @@
 | Parse fail | 1,192 |
 | Language fail | 336 |
 | 成功率 | 99.49% |
-| 基准吞吐 | 13.31 samples/s |
 | 最终吞吐 | 10.15 samples/s |
-| 总耗时 | 29,567秒，约8小时13分钟 |
+| 总耗时 | 8小时13分钟 |
 
 ### 结论
 
-多实例数据并行显著优于将7B模型做张量并行。短输出与vLLM连续批处理使30万级蒸馏在单机4卡内可行。
+短输出、异步请求和四个独立vLLM实例适合单机多卡数据蒸馏；30万级样本可在一个工作日内完成。
 
-## 3. 实验二：模板化元推理清洗
+## 3. E2：CoT质量清洗消融
 
-### 问题
+### 目的
 
-全量审计发现部分think并未直接分析图像或问题，而是输出“the answer follows”“reference answer”“该答案”等元叙述。它们格式正确，但训练价值较低，并可能强化模板套话。
+比较“仅保证XML格式”和“进一步过滤模板化元推理”的数据质量差异。
 
 ### 方法
 
-只扫描think内容，按中英文元叙述规则流式过滤；不修改答案和图片字段。
+只检查`<think>`内容，过滤“the answer follows”“reference answer”“该答案”等不分析问题本身的元叙述，不修改答案与图片。
 
 ### 结果
 
-| 指标 | 数值 |
-|---|---:|
-| 清洗前 | 300,023 |
-| 过滤 | 113,929 |
-| 清洗后 | 186,094 |
-| 保留率 | 62.03% |
-| 规则残留 | 0 |
-| 格式/空答案/空推理/图片异常 | 0 |
-| 重复conversation | 71 |
+| 数据版本 | 样本数 | 元推理残留 | 格式/空答案/损坏图片 |
+|---|---:|---:|---:|
+| 格式清洗后 | 300,023 | 113,929 | 0 |
+| 严格语义清洗后 | 186,094 | 0 | 0 |
+
+严格清洗保留率为62.03%，另有71条重复conversation待训练采样时去重。
 
 ### 结论
 
-只检查XML标签会高估CoT质量。对think语义进行独立质量控制是CoT-SFT前的必要步骤。
+格式正确不代表推理有效。后续CoT-SFT使用186,094条严格清洗数据，并将未严格清洗版本仅作为数据质量消融对照。
 
-## 4. 实验三：Reason checkpoint结构兼容
+## 4. E3：Multimodal Pretrain
 
-### 问题
+### 目的
 
-原服务器默认结构为8层、KV heads 4、FFN 2432，并包含Q/K Norm；`reason_768.pth`实际为16层、KV heads 2、FFN 2048且没有Q/K Norm。直接宽松加载只能匹配约28%参数。
+在Reasoning LLM上建立视觉语言对齐，并通过图像置空消融验证模型确实使用视觉信息。
 
-### 修改
+### 设置
 
-- 建立唯一配置`reason_vlm_109m`
-- 16层、hidden 768、8/2 attention heads、FFN 2048
-- 关闭Q/K Norm
-- 使用严格加载器，只允许缺少视觉模块参数
-
-### 结果
-
-| 指标 | 数值 |
-|---|---:|
-| Checkpoint tensors | 147 |
-| Checkpoint parameters | 108,946,176 |
-| Shape mismatch | 0 |
-| Unexpected | 0 |
-| 允许缺少 | Vision Projector |
-| 文本前向 | 通过，logits `(1,4,6400)` |
-
-### 结论
-
-主干已经实现结构级兼容，不再依赖`strict=False`掩盖错误。项目模型参数量应统一描述为约109M。
-
-## 5. 实验四：SigLIP P32视觉链路
-
-### 问题
-
-实际视觉模型为P32/256：`256/32=8`，因此输出64个patch token。原Projector写死按P16的256 token reshape，无法直接训练。
-
-### 修改
-
-- 使用AutoModel/AutoImageProcessor加载视觉模型
-- 根据`image_size`和`patch_size`自动计算source tokens
-- Projector检查source/target tokens是否整除
-
-### 结果
-
-| 指标 | 数值 |
-|---|---:|
-| Vision class | SiglipVisionModel |
-| Image / Patch | 256 / 32 |
-| Source / Target tokens | 64 / 64 |
-| Projector merge | 1 |
-| 单图loss | 9.7699，有限 |
-| Projector gradient norm | 63.35，非零 |
-
-### 结论
-
-图像编码、视觉token注入、LLM forward、loss和backward链路已打通。
-
-## 6. GRPO实现分析
-
-当前GRPO为原生PyTorch实现：
-
-1. 每个prompt在线采样4个completion；
-2. 按格式、标签、答案和可选judge计算奖励；
-3. 对同一prompt的奖励执行组内均值/标准差归一化；
-4. Policy与冻结Reference Model计算token log-prob；
-5. 使用相对优势与token级KL构造loss；
-6. DDP在4张GPU上同步更新。
-
-已修复：
-
-- 不再使用`freeze_llm=2`冻结整个LLM；
-- 从`<answer>`而非仅从`boxed`中提取答案；
-- 数字任务使用数值容差；
-- 字符串任务使用归一化exact match。
-
-尚需补充：任务类型路由、部分奖励、reward variance、退化组比例和KL分项日志。
-
-### 是否需要VERL
-
-当前不需要。VERL适合多机、多角色资源编排、独立rollout集群和大规模异步采样；当前单机4卡、109M模型更适合保留可读的原生实现。后续如果rollout成为主要瓶颈，再将生成引擎抽象成独立backend，而不是现在就整体迁移。
-
-## 7. 数据与资产状态
-
-| 资产 | 状态 |
+| 项目 | 配置 |
 |---|---|
-| `out/reason_768.pth` | 已验证 |
-| `model/siglip2-base-p32-256-ve` | 已验证 |
-| `dataset/pretrain_i2t.parquet` | 1,274,698行，可读 |
-| `dataset/sft_i2t.parquet` | 2,904,511行，可读 |
-| `dataset/sft_i2t_cot_distilled_clean.parquet` | 186,094行，可读 |
-| SwanLab | 0.7.20，已登录 |
+| 初始化 | `reason_768.pth` |
+| 数据 | 1,273,674训练 / 1,024固定验证 |
+| 视觉编码器 | SigLIP P32/256，冻结 |
+| 可训练模块 | Vision Projector + LLM第0层 |
+| GPU | 4×A10 |
+| Batch | 8/卡，global batch 32 |
+| Sequence length | 360 |
+| Epoch | 1 |
+| Learning rate | 4e-4 |
 
-## 8. 当前结论与限制
+### 消融设计
 
-训练前的权重、数据、视觉链路、固定验证集和监控资产已经到位。P0已通过，可以进入正式Pretrain；最终模型效果仍须由后续阶段实验给出。
+在相同的256条固定验证样本上比较：
 
-## 9. P0训练前验收结果
-
-| 项目 | 结果 |
+| 条件 | 输入 |
 |---|---|
-| Pretrain schema / rows | `conversations:string, image_bytes:binary` / 1,274,698 |
-| 图片审计 | 固定种子抽检10,000条，10,000条有效 |
-| 固定验证集 | 1,024条，已从训练集排除 |
-| Manifest SHA-256 | `731b68234ab6c926cb2629812337abff501e581aa44d2ff34e4a437366619f695` |
-| 单图测试 | loss 11.769444；projector grad norm 6.306393 |
-| 4卡DDP | 50步停止，恢复至100步，无hang或NaN |
-| Pretrain稳态吞吐 | 约359–363 samples/s |
-| Pretrain峰值显存 | 2.42 GB/卡，batch size 8/卡，seq 360 |
-| SFT稳态吞吐 | 约94–95 samples/s |
-| SFT峰值显存 | 4.18 GB/卡，batch size 4/卡，seq 768 |
-| SwanLab | 账号`jinin25`；同一run ID完成续训 |
+| Real Image | 原始图像 |
+| Zero Image | shape相同的全零图像 |
 
-### 一轮训练耗时估算
+若Zero Image loss显著高于Real Image，说明训练后的预测依赖视觉信号。正式结果由后台训练结束后写入本节。
 
-以下由4×A10短基准线性外推，未包含初始化、周期评估和大checkpoint上传时间：
+## 5. E4：General VLM-SFT
 
-| 实验 | 数据规模 | 预计耗时 |
-|---|---:|---:|
-| Multimodal Pretrain 1 epoch | 1,273,674条训练样本 | 约1.0小时 |
-| General SFT 30万条 | 300,000 | 约0.9小时 |
-| General SFT 60万条 | 600,000 | 约1.8小时 |
-| General SFT全量1 epoch | 2,904,511 | 约8.5小时 |
-| CoT-SFT 1 epoch | 186,094 + 普通SFT混合 | 约0.7–1.0小时 |
-| CoT-SFT两组×2 epochs | Dropout 0 / 0.2 | 约3–4小时 |
-| GRPO G0 | 1,000 prompts | 约0.5–1.5小时，需实测rollout |
-| GRPO G1 | 5,000 prompts | 约2.5–7.5小时，需实测rollout |
-| GRPO G2 | 10,000–20,000 prompts | 约5–30小时，取决于生成长度 |
+计划对比30万、60万确定性分层样本；必要时补充290万全量1 epoch。统一从E3权重初始化，冻结SigLIP，训练LLM与Projector。主要指标为普通VQA、OCR、计数、图像描述和视觉置空下降幅度。
 
-Pretrain与SFT各做1 epoch在4×A10上可行。若General SFT目标是验证研究方案，优先使用30–60万确定性分层样本；全量1 epoch虽然能在约一个工作日内完成，但实验迭代成本高且边际收益尚未验证。
+| 组别 | 数据量 | 作用 |
+|---|---:|---|
+| SFT-300K | 300,000 | 快速主实验 |
+| SFT-600K | 600,000 | 数据规模消融 |
+| SFT-Full | 2,904,511 | 资源允许时的上限对照 |
+
+## 6. E5：CoT-SFT与Reasoning Dropout
+
+| 组别 | CoT | Dropout | 目的 |
+|---|---|---:|---|
+| General SFT | 无 | 0 | 基线 |
+| CoT-SFT | 有 | 0 | 测量CoT注入收益 |
+| CoT-SFT + RD | 有 | 0.2 | 测量模板依赖与泛化变化 |
+
+比较可验证推理准确率、普通VQA保持率、reasoning-on/off结果和格式合规率。
+
+## 7. E6：Rule-based GRPO
+
+从1,000条可验证任务开始，确认reward方差、KL和答案准确率变化后扩展到5,000及10,000–20,000条。最终对比同一CoT-SFT checkpoint在GRPO前后的准确率，而不是只比较格式奖励。
+
+## 8. 最终结果表
+
+| 模型阶段 | 普通VQA | OCR | 计数 | 推理准确率 | 置空下降 | 格式合规率 |
+|---|---:|---:|---:|---:|---:|---:|
+| Reason LLM | 待测 | 待测 | 待测 | 待测 | - | 待测 |
+| + Pretrain | 运行中 | 运行中 | 运行中 | - | 运行中 | - |
+| + General SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+| + CoT-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+| + Reasoning Dropout | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+| + GRPO | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |

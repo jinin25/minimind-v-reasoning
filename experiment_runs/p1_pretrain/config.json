@@ -1,0 +1,21 @@
+{
+  "stage": "P1 Multimodal Pretrain",
+  "model_profile": "reason_vlm_109m",
+  "initial_weight": "out/reason_768.pth",
+  "vision_encoder": "model/siglip2-base-p32-256-ve",
+  "dataset": "dataset/pretrain_i2t.parquet",
+  "train_samples": 1273674,
+  "validation_samples": 1024,
+  "epochs": 1,
+  "world_size": 4,
+  "batch_size_per_gpu": 8,
+  "global_batch_size": 32,
+  "num_workers": 4,
+  "nccl_p2p_disable": true,
+  "nccl_ib_disable": true,
+  "max_seq_len": 360,
+  "learning_rate": 0.0004,
+  "freeze_strategy": "SigLIP frozen; Vision Projector and LLM layer 0 trainable",
+  "monitor": "background log; metrics imported after training",
+  "visual_ablation_samples": 256
+}

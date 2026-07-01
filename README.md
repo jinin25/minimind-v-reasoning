@@ -56,7 +56,7 @@ flowchart LR
 4. **Reasoning Dropout**：随机移除完整think块，缓解模型对固定模板的依赖。
 5. **Rule-based GRPO**：在选择题、数字、OCR和短答案任务上使用可验证规则奖励优化答案决策。
 
-## 关键技术变革
+## 方案对比
 
 | 早期方案 | 当前方案 | 原因 |
 |---|---|---|
@@ -68,6 +68,34 @@ flowchart LR
 | GRPO冻结LLM | GRPO更新LLM与Projector | 让策略模型真正学习 |
 | answer标签与reward解析错配 | 统一解析`<answer>` | 保证正确答案获得奖励 |
 | 单卡串行蒸馏 | 4卡vLLM异步蒸馏 | 将30万样本压缩到一个工作日完成 |
+
+### 训练阶段对比
+
+| 阶段 | 初始化 | 可训练模块 | 数据 | 主要目标 |
+|---|---|---|---:|---|
+| Multimodal Pretrain | Reason LLM | Projector + LLM第0层 | 127万 | 视觉语言对齐 |
+| General VLM-SFT | Pretrain | Projector + LLM | 30–290万 | 通用读图与指令跟随 |
+| CoT-SFT | General SFT | Projector + LLM | 18.6万 + 混合数据 | 注入结构化推理 |
+| GRPO | CoT-SFT | Policy LLM + Projector | 1千–2万 | 优化可验证答案决策 |
+
+### 核心消融对比
+
+| 对比 | 控制变量 | 回答的问题 |
+|---|---|---|
+| Real Image vs Zero Image | 文本、模型、样本一致 | 模型是否真正使用图像？ |
+| SFT-300K vs SFT-600K | 训练配置一致 | 增加SFT数据是否继续有效？ |
+| General SFT vs CoT-SFT | 是否加入CoT | CoT是否提升推理能力？ |
+| Dropout 0 vs 0.2 | 推理数据一致 | 随机丢弃是否缓解模板依赖？ |
+| CoT-SFT vs GRPO | 初始化与评测集一致 | 规则奖励是否提升答案准确率？ |
+
+### 数据版本对比
+
+| 数据 | 样本数 | 用途 | 状态 |
+|---|---:|---|---|
+| Pretrain | 1,274,698 | 视觉语言对齐 | 已就绪 |
+| General SFT | 2,904,511 | 通用视觉指令 | 已就绪 |
+| Distilled CoT | 300,023 | 清洗前对照 | 已完成 |
+| Clean CoT | 186,094 | CoT-SFT主数据 | 已完成 |
 
 ## 已完成实验概览
 
@@ -132,4 +160,3 @@ dataset/filter_meta_reasoning.py     元推理清洗
 - vLLM仅用于教师数据蒸馏
 
 本项目的GRPO暂不使用VERL。对于单机4卡和约109M模型，原生PyTorch实现更便于控制rollout、奖励、KL和消融变量；如果未来扩展到多机、大规模异步rollout或独立推理集群，再考虑迁移到VERL。
-
