@@ -4,6 +4,7 @@ __package__ = "dataset"
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import json
 import random
+import re
 import torch
 import io
 from PIL import Image
@@ -37,21 +38,58 @@ def pre_processing_chat(conversations, add_system_ratio=0.2):
             return [{'role': 'system', 'content': random.choice(SYSTEM_PROMPTS)}] + conversations
     return conversations
 
-def post_processing_chat(prompt_content, empty_think_ratio=0.2):
-    # 以80%概率移除空思考标签
+def post_processing_chat(prompt_content, empty_think_ratio=0.2, cot_trim_ratio=0.3,
+                         reasoning_drop_ratio=0.0):
+    """训练时的数据增强：对 assistant 输出做随机变换
+
+    1. 移除空 think 标签（80% 概率）
+       目的：让模型学会在不需要推理时直接回答
+
+    2. Reasoning Dropout：删除完整 think 块，只训练 answer
+
+    3. 截断推理链到第一句话（30% 概率）
+       目的：迫使模型用最少信息推理，适配 67M 小模型容量
+    """
+    # [增强 1] 80% 概率移除空 think 标签
     if '<think>\n\n</think>\n\n' in prompt_content and random.random() > empty_think_ratio:
         prompt_content = prompt_content.replace('<think>\n\n</think>\n\n', '')
+
+    # [增强 2] Reasoning Dropout。它与“截短推理”是两个不同实验变量。
+    if reasoning_drop_ratio > 0 and random.random() < reasoning_drop_ratio:
+        prompt_content = re.sub(
+            r'<think>\s*.*?\s*</think>\s*', '', prompt_content,
+            count=1, flags=re.DOTALL
+        )
+
+    # [增强 3] 30% 概率截断推理链到第一句话
+    # 训练时随机截断，迫使模型学会"用最少推理步骤得出结论"
+    if cot_trim_ratio > 0 and random.random() < cot_trim_ratio:
+        match = re.search(r'<think>\s*(.*?)\s*</think>', prompt_content, re.DOTALL)
+        if match:
+            body = match.group(1).strip()
+            # 取第一个句号/句点作为截断点
+            for sep in ['。', '. ']:
+                if sep in body:
+                    body = body.split(sep)[0] + sep
+                    break
+            if len(body) > 5:  # 截断后仍有效才替换
+                prompt_content = prompt_content[:match.start(1)] + body + prompt_content[match.end(1):]
+
     return prompt_content
 
 
 class VLMDataset(Dataset):
-    def __init__(self, parquet_path, tokenizer, preprocess=None, max_length=512, image_special_token='<|image_pad|>', image_token_len=64):
+    def __init__(self, parquet_path, tokenizer, preprocess=None, max_length=512,
+                 image_special_token='<|image_pad|>', image_token_len=64,
+                 reasoning_drop_ratio=0.0, cot_trim_ratio=0.0):
         super().__init__()
         self.table = pa.Table.from_batches(pq.ParquetFile(parquet_path).iter_batches())
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.preprocess = preprocess
         self.image_special_token = image_special_token * image_token_len
+        self.reasoning_drop_ratio = float(reasoning_drop_ratio)
+        self.cot_trim_ratio = float(cot_trim_ratio)
         self.bos_id = tokenizer(f'{tokenizer.bos_token}assistant\n', add_special_tokens=False).input_ids
         self.eos_id = tokenizer(f'{tokenizer.eos_token}\n', add_special_tokens=False).input_ids
 
@@ -93,10 +131,14 @@ class VLMDataset(Dataset):
         conversations = json.loads(self.table['conversations'][index].as_py())
         image_bytes = self.table['image_bytes'][index].as_py()
         if not isinstance(image_bytes, list): image_bytes = [image_bytes]
-        
+
         conversations = pre_processing_chat(conversations)
         prompt = self.create_chat_prompt(conversations)
-        prompt = post_processing_chat(prompt)
+        prompt = post_processing_chat(
+            prompt,
+            reasoning_drop_ratio=self.reasoning_drop_ratio,
+            cot_trim_ratio=self.cot_trim_ratio,
+        )
         input_ids = self.tokenizer(prompt).input_ids[:self.max_length]
         input_ids += [self.tokenizer.pad_token_id] * (self.max_length - len(input_ids))
         labels = self.generate_labels(input_ids)

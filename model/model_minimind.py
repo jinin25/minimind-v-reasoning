@@ -27,6 +27,8 @@ class MiniMindConfig(PretrainedConfig):
         self.max_position_embeddings = kwargs.get("max_position_embeddings", 32768)
         self.rms_norm_eps = kwargs.get("rms_norm_eps", 1e-6)
         self.rope_theta = kwargs.get("rope_theta", 1e6)
+        # reason_768.pth 没有 Q/K Norm。
+        self.qk_norm = kwargs.get("qk_norm", True)
         self.inference_rope_scaling = kwargs.get("inference_rope_scaling", False)
         self.rope_scaling = {
             "beta_fast": 32,
@@ -99,8 +101,8 @@ class Attention(nn.Module):
         self.k_proj = nn.Linear(config.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(config.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(config.num_attention_heads * self.head_dim, config.hidden_size, bias=False)
-        self.q_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
-        self.k_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.q_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps) if config.qk_norm else nn.Identity()
+        self.k_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps) if config.qk_norm else nn.Identity()
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
         self.dropout = config.dropout
@@ -233,7 +235,7 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
         self.model = MiniMindModel(self.config)
         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
         self.model.embed_tokens.weight = self.lm_head.weight
-    
+
     def forward(self, input_ids, attention_mask=None, past_key_values=None, use_cache=False, logits_to_keep=0, labels=None, **kwargs):
         hidden_states, past_key_values, aux_loss = self.model(input_ids, attention_mask, past_key_values, use_cache, **kwargs)
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
@@ -246,7 +248,7 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
             else:
                 loss = x.new_zeros(())
         return MoeCausalLMOutputWithPast(loss=loss, aux_loss=aux_loss, logits=logits, past_key_values=past_key_values, hidden_states=hidden_states)
-    
+
     # https://github.com/jingyaogong/minimind/discussions/611
     @torch.inference_mode()
     def generate(self, inputs=None, attention_mask=None, max_new_tokens=8192, temperature=0.85, top_p=0.85, top_k=50, eos_token_id=2, streamer=None, use_cache=True, num_return_sequences=1, do_sample=True, repetition_penalty=1.0, **kwargs):
@@ -262,7 +264,7 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
             logits = outputs.logits[:, -1, :] / temperature
             if repetition_penalty != 1.0:
                 for i in range(input_ids.shape[0]): logits[i, torch.unique(input_ids[i])] /= repetition_penalty
-            if top_k > 0: 
+            if top_k > 0:
                 logits[logits < torch.topk(logits, top_k)[0][..., -1, None]] = -float('inf')
             if top_p < 1.0:
                 sorted_logits, sorted_indices = torch.sort(logits, descending=True)

@@ -1,0 +1,66 @@
+{
+  "input": "/home/data/lilab06/wj/minimind-v-reasoning/dataset/sft_i2t_cot_distilled.parquet",
+  "output": "/home/data/lilab06/wj/minimind-v-reasoning/dataset/sft_i2t_cot_distilled_clean.parquet",
+  "created_at": "2026-07-01 15:58:54",
+  "elapsed_sec": 13.44,
+  "counts": {
+    "input_rows": 300023,
+    "filtered_meta": 113929,
+    "rule_reference_answer_en": 27001,
+    "rule_answer_meta_en": 70610,
+    "kept_rows": 186094,
+    "rule_answer_meta_zh": 18464,
+    "rule_format_meta": 31,
+    "rule_response_meta_en": 85
+  },
+  "keep_ratio": 0.6202657796235622,
+  "rules": {
+    "reference_answer_en": "\\b(?:the\\s+)?reference\\s+answer\\b|\\bground[ -]?truth\\s+answer\\b",
+    "answer_meta_en": "\\b(?:the|this|that|given|provided)\\s+answer\\s+(?:follows|is|was|provides?|describes?|explains?|matches?|aligns?|reflects?|indicates?|states?|suggests?|addresses?|responds?|correctly|accurately)\\b",
+    "response_meta_en": "\\b(?:the|this|that|given|provided)\\s+(?:response|description)\\s+(?:is|was|provides?|describes?|explains?|matches?|aligns?|reflects?|indicates?|states?|suggests?|addresses?|responds?|correctly|accurately)\\b",
+    "answer_meta_zh": "参考答案|标准答案|给定答案|提供的答案|上述答案|这个答案|该答案|答案之所以|答案(?:准确|正确|符合|匹配|描述|解释|表明|指出)|该回答|这个回答|上述回答|给出的回答|回答之所以|回答(?:准确|正确|符合|匹配|描述|解释|表明|指出)",
+    "format_meta": "\\b(?:requested|required|specified)\\s+(?:format|structure)\\b|(?:要求|指定|规定)的(?:格式|结构)"
+  },
+  "examples": {
+    "reference_answer_en": [
+      "The answer follows because it accurately describes the visual elements and context of the image, matching the details provided in the reference answer.",
+      "The reference answer describes the visual elements and layout of the image, explaining the composition and design choices that make the text and background elements clear and impactful.",
+      "The reference answer provides a detailed description of the image, breaking down the visual elements and their symbolic meanings, which directly follows the question's request for a written representation of the image.",
+      "The reference answer provides a detailed description of the image, including the type of artwork, its layers, the frame, and the decorative object, all of which are clearly explained and logically follow the question's request for a descriptive format.",
+      "The reference answer emphasizes the importance of careful identification and consideration of environmental impacts, which are relevant to the task of identifying native weed species in their natural habitat and alongside neighboring flora."
+    ],
+    "answer_meta_en": [
+      "The answer follows because it accurately describes the visual elements and context of the image, matching the details provided in the reference answer.",
+      "The answer follows because it describes the dress's material composition based on observed textures and appearances, aligning with the question's focus on the material of the dress.",
+      "The answer follows because it directly interprets the elements in the image, such as \"Spanish Stories\" and \"Follow-up Activities,\" to infer the target audience and educational benefits, which are then logically deduced from the context provided.",
+      "The answer follows because it translates the visual details of the mountain bike into descriptive words, explaining the materials, features, and design elements observed in the image.",
+      "The answer describes the man's actions, attire, and the setting in detail to convey the image to someone who cannot see it."
+    ],
+    "response_meta_en": [
+      "The answer describes the image by detailing the hazelnut's shape, texture, color, and the contrast with the dark background, ensuring the description is clear and focused on the nut itself.",
+      "The answer follows because the description matches the characteristics of an LED light bulb, including its shape, size, color, and design features like the clear diffuser and lack of filaments or gases.",
+      "The answer follows because the description matches the characteristics of a button, including its shape, the presence of holes, and its typical use in clothing and crafts.",
+      "The answer is correct because the description aligns with the image's elements, including the bench, street, and the object on the bench, which is interpreted as a bird given the context.",
+      "The answer describes the image by detailing the product, its packaging, and the visual and textual elements present, ensuring the description is clear and informative for someone who cannot see the image."
+    ],
+    "answer_meta_zh": [
+      "参考答案通过分析表情和身体语言，准确地描述了图片中人物复杂而多层次的情绪，包括痛苦、恐惧、担忧、同情和悲伤，以及他们之间的慰藉和支持，这与问题要求的解释相符。",
+      "答案解释了棒球手套在棒球运动中的用途，并确认它是图片中唯一与体育用品相关的物品，因此答案是正确的。",
+      "参考答案详细描述了图片中膳食补充剂标签上的文字、颜色和设计元素，以及瓶盖和瓶子的颜色和外观，从而准确地转录成了描述性段落。",
+      "答案解释了价格的具体数值及其可能的简化表示方式。",
+      "答案描述了相机镜头的近景视图，详细解释了镜头的结构和材质特征，符合问题要求的文字描述。"
+    ],
+    "format_meta": [
+      "The answer follows because it directly lists the text present in the image in the requested format, including orientations and separation by semicolons.",
+      "答案遵循了问题的结构，首先正确地识别了图片类型为粗略草图，并准确描述了图片中的主要对象是一把铲子，符合题目要求的格式。",
+      "答案遵循了题目要求的格式，准确地提供了车型、制造商和制造年份，符合题目中给出的例子。",
+      "答案解释了车辆的型号、制造商以及根据设计特点推测的制造年份范围，符合题目要求的格式。",
+      "The image content does not match the categories provided (AMAZON, DSLR, WEBCAM), so it is not possible to accurately name the domain or the object in the specified format 'Category ObjectName'."
+    ]
+  },
+  "validation": {
+    "rows": 186094,
+    "row_groups": 151,
+    "schema_match": true
+  }
+}

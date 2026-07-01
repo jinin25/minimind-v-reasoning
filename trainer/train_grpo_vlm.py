@@ -25,9 +25,8 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
 
 from model.model_vlm import MiniMindVLM, VLMConfig
+from model.model_profiles import add_model_profile_argument, build_vlm_config
 from reward.format import format_reward_fn
-from reward.number import number_reward_fn
-from reward.string_matching import string_matching_reward_fn
 from trainer.trainer_utils import (
     Logger,
     SkipBatchSampler,
@@ -37,6 +36,7 @@ from trainer.trainer_utils import (
     setup_seed,
     vlm_checkpoint,
     vlm_collate_fn,
+    load_vlm_weights,
 )
 
 warnings.filterwarnings("ignore")
@@ -280,7 +280,7 @@ class VLMGRPOCollator:
 
 
 class LocalRewarder:
-    """Teaching-friendly reward composition with optional judge reward."""
+    """组合格式、答案与可选 Judge 奖励。"""
 
     def __init__(
         self,
@@ -338,10 +338,22 @@ class LocalRewarder:
     @staticmethod
     def _answer_reward(completion, answer, answer_type):
         answer_str = _safe_answer_to_str(answer)
+        match = re.search(r"<answer>\s*(.*?)\s*</answer>", completion, flags=re.S | re.I)
+        predicted = match.group(1).strip() if match else ""
+        if not predicted or not answer_str:
+            return 0.0
         t = str(answer_type).strip().lower()
         if "number" in t:
-            return float(number_reward_fn(completion, answer_str))
-        return float(string_matching_reward_fn(completion, answer_str))
+            pred_nums = re.findall(r"-?\d+(?:\.\d+)?", predicted)
+            ref_nums = re.findall(r"-?\d+(?:\.\d+)?", answer_str)
+            if not pred_nums or not ref_nums:
+                return 0.0
+            pred_value, ref_value = float(pred_nums[-1]), float(ref_nums[-1])
+            tolerance = max(1e-6, abs(ref_value) * 1e-4)
+            return float(abs(pred_value - ref_value) <= tolerance)
+
+        normalize = lambda x: re.sub(r"\s+", " ", x).strip().lower()
+        return float(normalize(predicted) == normalize(answer_str))
 
     def _judge_reward(self, completion, answer, prompt_text, problem_type, source, prompt_type):
         if self._judge_fn is None:
@@ -678,7 +690,8 @@ def train_one_epoch(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MiniMind-V GRPO training (teaching & minimal)")
+    parser = argparse.ArgumentParser(description="MiniMind-V GRPO training")
+    add_model_profile_argument(parser)
     parser.add_argument("--data_dir", type=str, default="../dataset/RL_Innovator-VL", help="RL_Innovator-VL directory")
     parser.add_argument("--save_dir", type=str, default="../out", help="Path to save merged model weights")
     parser.add_argument("--checkpoint_dir", type=str, default="../checkpoints", help="Path to save resume checkpoint")
@@ -693,8 +706,6 @@ def main():
     parser.add_argument("--dtype", type=str, default="bfloat16", choices=["float16", "bfloat16", "float32"])
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu")
 
-    parser.add_argument("--hidden_size", type=int, default=768)
-    parser.add_argument("--num_hidden_layers", type=int, default=8)
     parser.add_argument("--use_moe", type=int, default=0, choices=[0, 1])
     parser.add_argument("--max_prompt_len", type=int, default=512)
     parser.add_argument("--max_gen_len", type=int, default=256)
@@ -727,8 +738,8 @@ def main():
     parser.add_argument("--init_ckpt", type=str, default="../checkpoints/cot_vlm_768.pth", help="Initial SFT/VLM checkpoint")
     parser.add_argument("--from_resume", type=int, default=0, choices=[0, 1], help="Resume from --save_weight checkpoint")
     parser.add_argument("--use_compile", type=int, default=0, choices=[0, 1])
-    parser.add_argument("--use_wandb", action="store_true")
-    parser.add_argument("--wandb_project", type=str, default="MiniMind-VLM-GRPO")
+    parser.add_argument("--use_swanlab", action="store_true")
+    parser.add_argument("--swanlab_project", type=str, default="MiniMind-V-Reasoning")
 
     args = parser.parse_args()
 
@@ -740,11 +751,10 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    vlm_config = VLMConfig(
-        hidden_size=args.hidden_size,
-        num_hidden_layers=args.num_hidden_layers,
-        max_seq_len=args.max_prompt_len + args.max_gen_len,
-        use_moe=bool(args.use_moe),
+    vlm_config = build_vlm_config(
+        args.model_profile,
+        args.max_prompt_len + args.max_gen_len,
+        args.use_moe,
     )
 
     ckp_data = None
@@ -769,12 +779,12 @@ def main():
         scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == "float16"))
 
     wandb = None
-    if args.use_wandb and is_main_process():
+    if args.use_swanlab and is_main_process():
         import swanlab as wandb
 
         wandb_id = ckp_data.get("wandb_id") if ckp_data else None
         wandb.init(
-            project=args.wandb_project,
+            project=args.swanlab_project,
             name=f"MiniMind-VLM-GRPO-E{args.epochs}-B{args.batch_size}-LR{args.learning_rate}",
             id=wandb_id,
             resume=("must" if wandb_id else None),
@@ -784,15 +794,14 @@ def main():
         vlm_config,
         from_weight="none",
         device=args.device,
-        freeze_llm=2,
+        freeze_llm=0,
     )
 
     if ckp_data is None and args.init_ckpt and os.path.exists(args.init_ckpt):
-        init_state = torch.load(args.init_ckpt, map_location="cpu")
-        missing, unexpected = model.load_state_dict(init_state, strict=False)
+        report = load_vlm_weights(model, args.init_ckpt, allow_vision_missing=True)
         Logger(
             f"Loaded init checkpoint: {args.init_ckpt}, "
-            f"missing={len(missing)}, unexpected={len(unexpected)}"
+            f"missing={len(report['missing'])}, unexpected={len(report['unexpected'])}"
         )
     elif ckp_data is None:
         Logger("No init checkpoint loaded. Training starts from current model state.")

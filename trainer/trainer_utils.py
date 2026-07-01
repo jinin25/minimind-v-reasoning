@@ -15,6 +15,8 @@ from torch.utils.data import Sampler
 from transformers import AutoTokenizer
 from model.model_vlm import MiniMindVLM
 
+PROJECT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 
 def get_model_params(model, config, ignore_patterns=['vision_encoder']):
     def should_count(n): return not any(p in n for p in ignore_patterns)
@@ -46,7 +48,7 @@ def get_lr(current_step, total_steps, lr):
 def init_distributed_mode():
     if int(os.environ.get("RANK", -1)) == -1:
         return 0  # 非DDP模式
-    
+
     dist.init_process_group(backend="nccl")
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
@@ -63,16 +65,57 @@ def setup_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
-def init_vlm_model(vlm_config, from_weight='pretrain_vlm', tokenizer_path='../model', vision_model_path='../model/siglip2-base-p16-ve', save_dir='../out', device='cuda', freeze_llm=0):
+def load_vlm_weights(model, weight_path, allow_vision_missing=True):
+    """严格加载权重。
+
+    Reason LLM 本来不含视觉编码器和 projector，因此只允许缺少这两部分；
+    其余 missing/unexpected/shape mismatch 都直接报错，避免 silent failure。
+    """
+    weights = torch.load(weight_path, map_location='cpu', weights_only=True)
+    if isinstance(weights, dict) and isinstance(weights.get('model'), dict):
+        weights = weights['model']
+
+    model_state = model.state_dict()
+    shape_bad = [
+        (name, tuple(weights[name].shape), tuple(model_state[name].shape))
+        for name in weights.keys() & model_state.keys()
+        if weights[name].shape != model_state[name].shape
+    ]
+    unexpected = sorted(name for name in weights if name not in model_state)
+    missing = sorted(name for name in model_state if name not in weights)
+    allowed_prefixes = ('vision_encoder.', 'vision_proj.') if allow_vision_missing else ()
+    illegal_missing = [name for name in missing if not name.startswith(allowed_prefixes)]
+
+    if shape_bad or unexpected or illegal_missing:
+        raise RuntimeError(
+            f"权重与模型结构不兼容: shape_bad={shape_bad[:5]}, "
+            f"unexpected={unexpected[:5]}, illegal_missing={illegal_missing[:5]}"
+        )
+
+    result = model.load_state_dict(weights, strict=False)
+    Logger(
+        f"Loaded weights: {weight_path}\n"
+        f"  tensors={len(weights)}, allowed_vision_missing={len(missing)}, "
+        f"unexpected={len(result.unexpected_keys)}"
+    )
+    return {"missing": missing, "unexpected": unexpected, "shape_bad": shape_bad}
+
+
+def init_vlm_model(vlm_config, from_weight='pretrain_vlm', tokenizer_path=None,
+                   vision_model_path=None, save_dir=None, device='cuda', freeze_llm=0):
+    tokenizer_path = tokenizer_path or os.path.join(PROJECT_DIR, 'model')
+    vision_model_path = vision_model_path or os.path.join(PROJECT_DIR, 'model', 'siglip2-base-p32-256-ve')
+    save_dir = save_dir or os.path.join(PROJECT_DIR, 'out')
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
     model = MiniMindVLM(vlm_config, vision_model_path=vision_model_path)
-    
+
     if from_weight != 'none':
         moe_suffix = '_moe' if vlm_config.use_moe else ''
         weight_path = f'{save_dir}/{from_weight}_{vlm_config.hidden_size}{moe_suffix}.pth'
-        weights = torch.load(weight_path, map_location=device)
-        model.load_state_dict(weights, strict=False)
-    
+        if not os.path.exists(weight_path):
+            raise FileNotFoundError(f"找不到初始化权重: {weight_path}")
+        load_vlm_weights(model, weight_path, allow_vision_missing=True)
+
     # 1、全部冻结，只打开vision_proj梯度
     for name, param in model.named_parameters():
         if 'vision_proj' not in name:
@@ -101,7 +144,7 @@ def vlm_checkpoint(vlm_config, weight='pretrain_vlm', model=None, optimizer=None
     moe_path = '_moe' if vlm_config.use_moe else ''
     ckp_path = f'{save_dir}/{weight}_{vlm_config.hidden_size}{moe_path}.pth'
     resume_path = f'{save_dir}/{weight}_{vlm_config.hidden_size}{moe_path}_resume.pth'
-    
+
     if model is not None:
         raw_model = model.module if isinstance(model, DistributedDataParallel) else model
         raw_model = getattr(raw_model, '_orig_mod', raw_model)
@@ -111,7 +154,7 @@ def vlm_checkpoint(vlm_config, weight='pretrain_vlm', model=None, optimizer=None
         ckp_tmp = ckp_path + '.tmp'
         torch.save({k: v.half().cpu() for k, v in clean_state_dict.items()}, ckp_tmp)
         os.replace(ckp_tmp, ckp_path)
-        
+
         wandb_id = None
         if wandb:
             if hasattr(wandb, 'get_run'):
@@ -119,7 +162,7 @@ def vlm_checkpoint(vlm_config, weight='pretrain_vlm', model=None, optimizer=None
                 wandb_id = getattr(run, 'id', None) if run else None
             else:
                 wandb_id = getattr(wandb, 'id', None)
-        
+
         resume_data = {
             'model': state_dict,
             'optimizer': optimizer.state_dict(),
@@ -136,7 +179,7 @@ def vlm_checkpoint(vlm_config, weight='pretrain_vlm', model=None, optimizer=None
                     resume_data[key] = raw_value.state_dict()
                 else:
                     resume_data[key] = value
-        
+
         resume_tmp = resume_path + '.tmp'
         torch.save(resume_data, resume_tmp)
         os.replace(resume_tmp, resume_path)
@@ -193,7 +236,7 @@ class SkipBatchSampler(Sampler):
         self.sampler = sampler
         self.batch_size = batch_size
         self.skip_batches = skip_batches
-    
+
     def __iter__(self):
         batch = []
         skipped = 0
@@ -208,7 +251,7 @@ class SkipBatchSampler(Sampler):
                 batch = []
         if len(batch) > 0 and skipped >= self.skip_batches:
             yield batch
-    
+
     def __len__(self):
         total_batches = (len(self.sampler) + self.batch_size - 1) // self.batch_size
         return max(0, total_batches - self.skip_batches)

@@ -4,7 +4,7 @@ import warnings
 from .model_minimind import *
 from typing import Optional, Tuple, List, Union
 from torch import nn
-from transformers import Siglip2ImageProcessor, Siglip2VisionModel
+from transformers import AutoImageProcessor, AutoModel
 from transformers.modeling_outputs import MoeCausalLMOutputWithPast
 
 warnings.filterwarnings('ignore')
@@ -23,6 +23,8 @@ class VLMConfig(MiniMindConfig):
 class MMVisionProjector(nn.Module):
     def __init__(self, in_dim, out_dim, source_tokens=256, target_tokens=64):
         super().__init__()
+        if source_tokens % target_tokens != 0:
+            raise ValueError(f"source_tokens={source_tokens} 必须能被 target_tokens={target_tokens} 整除")
         self.target_tokens = target_tokens
         self.merge = source_tokens // target_tokens
         self.mlp = nn.Sequential(
@@ -50,7 +52,16 @@ class MiniMindVLM(MiniMindForCausalLM):
         self.vision_encoder, self.processor = self.__class__.get_vision_model(vision_model_path)
         print("Vision model loaded, creating vision_proj...")
         sys.stdout.flush()
-        self.vision_proj = MMVisionProjector(self.config.image_hidden_size, self.config.hidden_size, target_tokens=self.config.image_token_len)
+        source_tokens = (
+            (self.vision_encoder.config.image_size // self.vision_encoder.config.patch_size) ** 2
+            if self.vision_encoder is not None else 256
+        )
+        self.vision_proj = MMVisionProjector(
+            self.config.image_hidden_size,
+            self.config.hidden_size,
+            source_tokens=source_tokens,
+            target_tokens=self.config.image_token_len,
+        )
         print("MiniMindVLM.__init__ completed")
         sys.stdout.flush()
 
@@ -63,18 +74,14 @@ class MiniMindVLM(MiniMindForCausalLM):
         print(f"Loading vision model from {model_path}...")
         import sys
         sys.stdout.flush()
-        model = Siglip2VisionModel.from_pretrained(
+        model = AutoModel.from_pretrained(
             model_path,
             local_files_only=True,
             trust_remote_code=False
         )
         print("Vision model loaded, loading processor...")
         sys.stdout.flush()
-        import json
-        preprocessor_config_path = os.path.join(model_path, 'preprocessor_config.json')
-        with open(preprocessor_config_path, 'r') as f:
-            preprocessor_config = json.load(f)
-        processor = Siglip2ImageProcessor(**preprocessor_config)
+        processor = AutoImageProcessor.from_pretrained(model_path, local_files_only=True)
         print("Processor loaded, freezing parameters...")
         sys.stdout.flush()
         # 冻结 vision_encoder 的所有参数

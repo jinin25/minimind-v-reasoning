@@ -1,313 +1,135 @@
-# 项目介绍
+# MiniMind-V-Reasoning
 
-在原有[Minimind-v](https://github.com/jingyaogong/minimind-v#)基础上，增加**推理**功能，让模型具有思考能力！
+MiniMind-V-Reasoning 是一个约 109M 参数的轻量多模态推理模型实验项目。项目以 MiniMind Reasoning LLM 为语言基座，连接冻结的 SigLIP 视觉编码器，通过多模态预训练、视觉指令微调、结构化 CoT 蒸馏和规则奖励 GRPO，研究小模型在有限算力下获得读图、简短推理和可验证决策能力的可行路径。
 
-# 快速开始
+## 项目目标
 
+项目围绕三个问题展开：
 
+1. Reasoning LLM 能否通过重新进行视觉语言对齐，稳定获得读图能力？
+2. 一句式结构化 CoT 与 Reasoning Dropout 能否增强推理，同时降低固定模板依赖？
+3. 不训练额外奖励模型，仅使用答案一致性规则，GRPO 能否进一步提升可验证视觉任务表现？
 
-## 从0开始训练
+## 模型架构
 
-
-### 1' 环境准备
-
-```bash
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```mermaid
+flowchart LR
+    I["Image"] --> V["SigLIP P32/256<br/>Frozen Vision Encoder"]
+    V --> P["Vision Projector<br/>64 visual tokens"]
+    P --> L["MiniMind Reasoning LLM<br/>109M / 16 layers"]
+    T["Text Prompt"] --> L
+    L --> O["think + answer"]
 ```
 
-<details>
-<summary>注：提前测试Torch是否可用cuda</summary>
+### 核心配置
 
-```bash
-import torch
-print(torch.cuda.is_available())
+| 模块 | 配置 |
+|---|---|
+| Language Backbone | MiniMind Reasoning |
+| LLM参数量 | 108,946,176 |
+| Hidden size | 768 |
+| Transformer layers | 16 |
+| Attention / KV heads | 8 / 2 |
+| FFN intermediate | 2048 |
+| Vocabulary | 6400 |
+| Vision Encoder | SigLIP，image 256，patch 32，冻结 |
+| Vision tokens | 64 |
+| Vision Projector | 2层MLP，可训练 |
+| 推理格式 | `<think>...</think><answer>...</answer>` |
+
+Vision Encoder 约 93M 参数但始终冻结；项目训练和保存的主体是约 109M LLM 与 Vision Projector。
+
+## 训练流程
+
+```mermaid
+flowchart LR
+    A["reason_768.pth"] --> B["Multimodal Pretrain"]
+    B --> C["General VLM-SFT"]
+    C --> D["CoT-SFT"]
+    D --> E["Reasoning Dropout"]
+    E --> F["Rule-based GRPO"]
 ```
 
-如果不可用，请自行去[torch_stable](https://download.pytorch.org/whl/torch_stable.html)
-下载whl文件安装。参考[链接](https://blog.csdn.net/weixin_45456738/article/details/141029610?ops_request_misc=&request_id=&biz_id=102&utm_term=%E5%AE%89%E8%A3%85torch&utm_medium=distribute.pc_search_result.none-task-blog-2~all~sobaiduweb~default-2-141029610.nonecase&spm=1018.2226.3001.4187)
+1. **Multimodal Pretrain**：冻结SigLIP，训练Projector和少量语言层，建立视觉语言对齐。
+2. **General VLM-SFT**：学习视觉描述、OCR、计数、问答和指令跟随。
+3. **CoT-SFT**：使用清洗后的结构化一句式推理数据注入推理模式。
+4. **Reasoning Dropout**：随机移除完整think块，缓解模型对固定模板的依赖。
+5. **Rule-based GRPO**：在选择题、数字、OCR和短答案任务上使用可验证规则奖励优化答案决策。
 
-</details>
+## 关键技术变革
 
-### 2' 数据下载
+| 早期方案 | 当前方案 | 原因 |
+|---|---|---|
+| 约67M、8层默认结构 | 约109M、16层Reason主线 | 与`reason_768.pth`严格兼容 |
+| `strict=False`宽松加载 | 主干权重严格shape校验 | 防止静默加载错误 |
+| 写死P16/256视觉输入 | 自动读取P32/256 patch数量 | 适配实际下载的视觉模型 |
+| 普通SFT和CoT脚本分叉 | 共用`train_sft_vlm.py` | 减少重复训练代码 |
+| 只截短推理 | 独立Reasoning Dropout | 正确验证模板依赖假设 |
+| GRPO冻结LLM | GRPO更新LLM与Projector | 让策略模型真正学习 |
+| answer标签与reward解析错配 | 统一解析`<answer>` | 保证正确答案获得奖励 |
+| 单卡串行蒸馏 | 4卡vLLM异步蒸馏 | 将30万样本压缩到一个工作日完成 |
 
-**minimind-v 原项目数据集（Pretrain+SFT阶段）：**
+## 已完成实验概览
 
+### CoT数据蒸馏
 
-从下文提供的[数据集链接](https://huggingface.co/datasets/jingyaogong/minimind-v_dataset)
-下载所需内容并放到`./dataset`下。
+- 原始图文指令：2,904,511条
+- 通过前置过滤：2,202,245条
+- 四卡蒸馏结果：300,023条
+- 成功率：99.49%
+- 总耗时：约8小时13分钟
+- 最终吞吐：约10.15 samples/s
 
+### CoT质量清洗
 
+- 过滤模板化元推理：113,929条
+- Clean CoT：186,094条
+- 保留率：62.03%
+- 格式错误、空答案、损坏图片：0
 
-<details>
-<summary>下载pretrain/sft数据须知</summary>
+### 模型兼容与视觉链路
 
-Pretrain数据：
-```bash
-wget https://hf-mirror.com/datasets/jingyaogong/minimind-v_dataset/resolve/main/pretrain_i2t.parquet
+- `reason_768.pth` 147个tensor严格匹配
+- Shape mismatch：0
+- Unexpected keys：0
+- 文本前向测试通过
+- SigLIP P32单图forward/backward通过
+- Vision Projector梯度非零
+
+详细记录见 [EXPERIMENT_REPORT.md](./EXPERIMENT_REPORT.md)，后续安排见 [EXPERIMENT_PLAN.md](./EXPERIMENT_PLAN.md)。
+
+## 当前效果
+
+当前已完成数据工程、模型兼容和单图训练链路验证，正式多阶段训练尚未开始。以下指标将在固定验证集上逐阶段补充：
+
+| 模型阶段 | 普通VQA | OCR | 计数 | 可验证推理 | 格式合规率 |
+|---|---:|---:|---:|---:|---:|
+| Reason LLM（无视觉） | - | - | - | 待测 | 待测 |
+| Multimodal Pretrain | 待实验 | 待实验 | 待实验 | - | - |
+| General VLM-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+| CoT-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+| CoT-SFT + GRPO | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+
+## 主要文件
+
+```text
+model/model_profiles.py             统一的reason_vlm_109m配置
+model/model_minimind.py             Reason LLM结构
+model/model_vlm.py                  SigLIP与Vision Projector
+trainer/train_pretrain_vlm.py       多模态预训练
+trainer/train_sft_vlm.py            普通SFT与CoT-SFT
+trainer/train_grpo_vlm.py           原生PyTorch GRPO
+scripts/validate_reason_checkpoint.py  权重兼容验证
+dataset/distill_multigpu.py         四卡异步蒸馏
+dataset/filter_meta_reasoning.py     元推理清洗
 ```
 
-SFT数据：
-```bash
-wget https://hf-mirror.com/datasets/jingyaogong/minimind-v_dataset/resolve/main/sft_i2t.parquet
-```
+## 训练环境
 
-建议预留~2GB空间存放数据集，若无多余空间存放pretrain数据，可尝试跳过pretrain训练步骤直接进行sft训练。
+- 4×NVIDIA A10 24GB
+- PyTorch DDP
+- SwanLab实验监控
+- vLLM仅用于教师数据蒸馏
 
-</details>
-
-
-
-
-
-**推理阶段数据：(CoT SFT + RL阶段)**
-
-
-CoT SFT数据：
-
-这个阶段的数据集是通过将原项目中SFT数据进行蒸馏得到，具体实现见dataset/distilled_sft_i2t.py
-
-
-RL阶段数据：
-
-这里使用的是[Innovator-VL-RL-172K](
-https://huggingface.co/datasets/InnovatorLab/Innovator-VL-RL-172K)
-
-
-<details>
-<summary>下载RL，蒸馏数据须知</summary>
-
-CoT SFT蒸馏：
-```bash
-export DISTILL_API_KEY="你的api key"
-python dataset/distilled_sft_i2t.py
-``` 
-这个蒸馏过程需要调用外部api，对数据生成解释，比较耗时。
-
-
-RL数据：
-```python
-from datasets import load_dataset
-
-ds = load_dataset("InnovatorLab/Innovator-VL-RL-172K")
-```
-
-RL数据大概需要占据~10GB的空间，建议提前做好准备。
-</details>
-
-### 3' 开始训练
-
-这里为了适配推理任务，LLM部分使用的是minimind官方提供的reasoning权重（在out/llm_768.pth），训练分为三个阶段：
-
-**3.1 预训练（学图像描述）**
-
-```bash
-# 基础训练命令（从LLM权重开始，仅训练vision_proj）
-python train_pretrain_vlm.py --epochs 4 --from_weight llm
-```
-
-> 执行预训练，得到 `pretrain_vlm_*.pth` 作为预训练的输出权重（其中*为模型的dimension，默认为768）
-
-
-**3.2 第一阶段监督微调（学看图对话方式）**
-
-```bash
-# 基础训练命令（从预训练权重开始，全参数微调）
-python train_sft_vlm.py --epochs 2 --from_weight pretrain_vlm
-```
-
-> 执行监督微调，得到 `sft_vlm_*.pth` 作为指令微调的输出权重
-
-**3.3 第1.5阶段监督微调（学推理方式）**
-
-```bash
-# 基础训练命令（从预训练权重开始，全参数微调）
-python train_sft_vlm.py --epochs 2 --from_weight sft_vlm --data_path ../dataset/sft_i2t_cot_distilled.parquet --save_weight sft_vlm_cot
-```
-
-> 执行监督微调，得到 `sft_vlm_cot_*.pth` 作为指令微调的输出权重
-
-
-**3.3 第三阶段GRPO（增加准确率）**
-
-```bash
-# 基础训练命令（从第一阶段微调权重开始，全参数微调）
-python train_grpo_vlm.py 
-
-```
-
-
-<details>
-<summary>注：训练须知</summary>
-
-**训练特性：**
-- 支持断点续训：添加`--from_resume 1`参数可从上次中断处继续训练
-- 支持GPU数量变化：续训时GPU数量改变会自动转换step
-- 原子性保存：使用临时文件+替换机制，防止保存过程中断导致权重损坏
-- 每次保存同时生成`out/**.pth`（模型权重）和`checkpoints/**_resume.pth`（训练状态）文件
-
-```bash
-# 训练中断后，使用相同命令并添加 --from_resume 1
-python train_sft_vlm.py --epochs 4 --from_resume 1
-```
-
-**参数说明：**
-- `--from_weight`: 基础权重名称（llm, pretrain_vlm, none等）
-- `--save_weight`: 保存权重的前缀名
-- `--from_resume`: 是否续训（0=从头开始，1=从检查点继续）
-- `--freeze_llm`: 是否冻结LLM参数（仅pretrain使用）
-- 更多可直接参考代码
-
-</details>
-
-
----
-
-### 4' 测试模型效果
-
-确保需要测试的模型`*.pth`文件位于`./out/`目录下。
-
-```bash
-# 测试SFT模型（默认）
-python eval_vlm.py --weight sft_vlm
-
-# 测试Pretrain模型
-python eval_vlm.py --weight pretrain_vlm
-
-# 测试RL模型
-python eval_vlm.py --weight grpo_vlm
-
-# 测试SFT CoT模型
-python eval_vlm.py --weight sft_vlm_cot
-
-```
-
-# 📌 评估
-
-### 实验结果
-
-
-Pretrain [768+8] (dense)
-![image](./images/pretrain_reason_loss.png)
-
-
-SFT [768+8] (dense)
-![input](./images/sft_reason_loss.png)
-
-
-### 效果测试
-
-#### 单图对话
-
-这里cot-prompt让模型简要回答，推理后总结成一句
-
-<table>
-  <thead>
-    <tr>
-      <th>image</th>
-      <th>minimind-3v</th>
-      <th>minimind-3v-cot</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/airplane-flying-blue-sky.jpg" alt="airplane">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>图中可见一架飞机正朝着飞机飞行。这架飞机正从一架白色飞机上起飞。</td>
-      <td>根据图像，可以看到一架白色的飞机在空中飞行。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/birthday-cake-candles-table.jpg" alt="birthday-cake">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>图中所示的是一个生日蛋糕，上面有一个蜡烛和一个糖霜。甜甜圈上有一只蜡烛，周围散落着一根蜡烛。此外还有一些蜡烛散落在整个蛋糕周围，形成了一个精美的装饰图案。
-图片中还有一只蜡烛，表明这是一场生日派对，为生日聚会增添了浪漫元素。</td>
-      <td> 图片显示了一张生日蛋糕，上面有蜡烛。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/pizza-on-wooden-board.jpg" alt="pizza">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>图片显示了几个披萨放在木桌上的披萨。首先，这块披萨是用红色或绿色切成薄片的。其中一块是白色的，而另一块则是绿色的。桌子上放着一把切成片的胡萝卜，这表明了他们正在享受一顿美味的披萨。
-除了披萨外，桌上还有两个碗，里面盛着几片黄色的野菜，这可能暗示着他们可能正在享用某种美味而又营养丰富的披萨。</td>
-      <td>图示中，一大片披萨被放置在木制木桌上。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/red-sports-car-road.jpg" alt="red-car">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>这幅图片描绘了一辆黄色的大红色汽车和一辆红色摩托车，还有一辆蓝色汽车。汽车的轮子、车身和后座都出现在场景中。
-在画面的右边，是白色的部分，背景中有一个红色的交通信号灯。这辆车停在附近，可能正在进行某种活动或观看。</td>
-      <td> 根据图像描述，这辆红色的车停在一条道路上，可能是为了在赛道上行驶。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/row-of-colorful-houses.jpg" alt="colorful-houses">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td> 图中有两扇大窗户，一扇大窗户在房间内。</td>
-      <td> 图中描绘了一幅色彩斑斓的城市景象，包括蓝色和白色的房屋和建筑物。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/snow-mountain-lake-view.jpg" alt="snow-mountain">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>图中描绘的是一个美丽的山坡，上面有树木和树林。山上有几棵树，树冠在背景中闪烁着。
-画面中有一个男人站在一片开阔的斜坡上，背景中有树木。这个场景似乎是在欣赏美丽湖景的一个关键位置。
-此外，可以看到一个远处的山坡上有几座小船，这说明这是一艘游艇和一排水道的存在。</td>
-      <td>图中所示，一个湖泊的自然景观，包括山脉、湖泊和湖泊。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/street-food-hotpot-table.jpg" alt="street-food">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>图片显示了热腾腾的汤，里面有各种香肠、肉松、蔬菜和肉类，包括牛排、烤肉和炖菜。总共有八个人在桌子上，每个人都戴着自己的话。
-餐桌上摆放着几个盆栽植物，其中一个靠近左边，另一个靠近右边。还有一个大号的茶杯放在桌子上。
-桌子上还摆放着一个杯子，这表明它们可能是在一个开放式的用餐区。
-此外，靠近左边的桌子，可以看到更远的距离，而靠近右边的桌子也表明它们是可开窗的。
-桌上还有一盆盆栽植物，其中一个在右边，其他的则靠近左边。</td>
-      <td> 图中展示了一种热闹的、充满活力的餐桌场景，其中包括一个热闹的餐桌和各种各样的盘子。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/three-kittens-basket.jpg" alt="kittens">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>该图片显示了一只白色的小白猫，它站在篮子里，很可能正在观察和照顾这只小猫。一只灰色的小猫被放置在一个篮子里，这表明这只小猫可能正在与小猫互动或研究它们的生活。
-此外，小猫的出现还暗示了这只猫可能正在与其他猫互动或观察周围的环境。总体而言，这只小猫很可能正在进行一次长途旅行或者观察周遭环境，因为它能提供关于周围环境、人与动物之间关系以及潜在宠物动物的有趣事实。</td>
-      <td>根据图像描述，可以推断出三只小猫在篮子里玩耍，它正站在篮子里。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/tropical-beach-palm-tree.jpg" alt="tropical-beach">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>这张图片描绘了一片美丽的棕榈树，旁边是一根棕榈树，这根棕榈树在阳光下闪烁着五彩斑斓的蓝色和白色。
-在靠近树林的地方，可以看到一个白色大沙沙地，给人一种宁静而祥和的感觉。棕榈树为画面增添了几分神秘和美丽。
-此外，周围的树木和水面亦显得繁忙而又安静。白色天鹅和棕榈树的存在暗示着一个人或一群人在自然中漫步，享受着彼此陪伴的感觉。</td>
-      <td>最终结论是：一张椅子被放置在海滩上，旁边是棕榈树。</td>
-    </tr>
-    <tr>
-      <td>
-        <img src="./dataset/eval_images/yellow-school-bus-road.jpg" alt="school-bus">
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-      </td>
-      <td>这幅图片展示了一个校庆场景，包括一个红色和黄色的公交车和一辆停在公交车旁边的几辆公交车。前景中几辆停放在一起，其中一些停靠在靠近画面边缘的地方，而另一些则靠近画面的中心部分，为画面增添了几分古色古香的气息。
-背景中有几辆汽车停在背景中，其中一辆车更靠近公交车旁边。还有一辆汽车停在场景左侧，另一辆更靠右，而更靠左的则停在更靠后位置。</td>
-      <td>图中显示的是一辆黄色的巴士，它停在路边。</td>
-    </tr>
-  </tbody>
-</table>
-
-
-### 效果小结：
-
-总体来说，回答更加简洁明了，对于图片中的主要内容提取能力更强了，但是还是有幻觉情况存在，并且推理能力由于数据集样本太小，训练也还暂时不够充分，推理能力还有很大上升空间。
-
+本项目的GRPO暂不使用VERL。对于单机4卡和约109M模型，原生PyTorch实现更便于控制rollout、奖励、KL和消融变量；如果未来扩展到多机、大规模异步rollout或独立推理集群，再考虑迁移到VERL。
 

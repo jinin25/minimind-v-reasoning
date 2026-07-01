@@ -8,7 +8,8 @@ import random
 from PIL import Image
 from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
 from model.model_vlm import MiniMindVLM, VLMConfig
-from trainer.trainer_utils import setup_seed, get_model_params
+from model.model_profiles import add_model_profile_argument, build_vlm_config
+from trainer.trainer_utils import setup_seed, get_model_params, load_vlm_weights
 
 warnings.filterwarnings('ignore')
 
@@ -54,7 +55,7 @@ def init_model(args):
         if args.weight == 'cot_vlm':
             ckp = os.path.expanduser(args.cot_weight_path)
         else:
-            ckp = f'./{args.save_dir}/{args.weight}_{args.hidden_size}{moe_suffix}.pth'
+            ckp = f'./{args.save_dir}/{args.weight}_{args.profile_hidden_size}{moe_suffix}.pth'
 
         if not os.path.exists(ckp):
             raise FileNotFoundError(
@@ -66,18 +67,13 @@ def init_model(args):
             )
 
         model = MiniMindVLM(
-            VLMConfig(
-                hidden_size=args.hidden_size,
-                num_hidden_layers=args.num_hidden_layers,
-                use_moe=bool(args.use_moe),
-            ),
-            vision_model_path='./model/siglip2-base-p16-ve',
+            build_vlm_config(args.model_profile, args.max_seq_len, args.use_moe),
+            vision_model_path='./model/siglip2-base-p32-256-ve',
         )
-        state_dict = torch.load(ckp, map_location=args.device)
-        model.load_state_dict({k: v for k, v in state_dict.items() if 'mask' not in k}, strict=False)
+        load_vlm_weights(model, ckp, allow_vision_missing=True)
     else:
         model = AutoModelForCausalLM.from_pretrained(args.load_from, trust_remote_code=True)
-        model.vision_encoder, model.processor = MiniMindVLM.get_vision_model('./model/siglip2-base-p16-ve')
+        model.vision_encoder, model.processor = MiniMindVLM.get_vision_model('./model/siglip2-base-p32-256-ve')
 
     get_model_params(model, model.config)
     preprocess = model.processor
@@ -101,6 +97,7 @@ def main():
             '3. python eval_vlm.py --load_from model --weight cot_vlm --cot_force_reasoning 0 --device cuda'
         ),
     )
+    add_model_profile_argument(parser)
     parser.add_argument('--load_from', default='model', type=str, help='模型加载路径（model=原生torch权重，其他路径=transformers格式）')
     parser.add_argument('--save_dir', default='out', type=str, help='模型权重目录')
     parser.add_argument(
@@ -123,8 +120,7 @@ def main():
         choices=[0, 1],
         help='cot_vlm 是否默认启用 Reasoning -> Answer 模板（0=否，1=是）',
     )
-    parser.add_argument('--hidden_size', default=768, type=int, help='隐藏层维度')
-    parser.add_argument('--num_hidden_layers', default=8, type=int, help='隐藏层数量')
+    parser.add_argument('--max_seq_len', default=1024, type=int, help='模型上下文长度')
     parser.add_argument('--use_moe', default=0, type=int, choices=[0, 1], help='是否使用MoE架构（0=否，1=是）')
     parser.add_argument('--max_new_tokens', default=512, type=int, help='最大生成长度')
     parser.add_argument('--temperature', default=0.9, type=float, help='生成温度，控制随机性（0-1，越大越随机）')
@@ -143,6 +139,7 @@ def main():
     parser.add_argument('--cot_top_p', default=0.8, type=float, help='cot_vlm 默认 top_p（未手动传 top_p 时生效）')
     parser.add_argument('--cot_max_new_tokens', default=256, type=int, help='cot_vlm 默认最大生成长度（未手动传 max_new_tokens 时生效）')
     args = parser.parse_args()
+    args.profile_hidden_size = build_vlm_config(args.model_profile, args.max_seq_len, args.use_moe).hidden_size
 
     is_cot_weight = args.weight == 'cot_vlm'
     effective_open_thinking = args.open_thinking if args.open_thinking is not None else (1 if is_cot_weight else 0)
