@@ -1,0 +1,22 @@
+{
+  "stage": "P2 General VLM-SFT 600K scale ablation",
+  "initial_weight": "out/pretrain_vlm_768.pth",
+  "dataset": "dataset/sft_i2t_600k.parquet",
+  "validation_dataset": "dataset/sft_i2t_val_1k.parquet",
+  "train_samples": 600000,
+  "contains_300k_baseline_subset": true,
+  "epochs": 1,
+  "world_size": 4,
+  "batch_size_per_gpu": 4,
+  "gradient_accumulation": 4,
+  "effective_global_batch_size": 64,
+  "max_seq_len": 768,
+  "learning_rate": 0.000005,
+  "log_interval_micro_steps": 20,
+  "eval_interval_micro_steps": 500,
+  "eval_batches_per_rank": 16,
+  "freeze_strategy": "SigLIP frozen; LLM and Vision Projector trainable",
+  "find_unused_parameters": true,
+  "nccl_p2p_disable": true,
+  "nccl_ib_disable": true
+}
