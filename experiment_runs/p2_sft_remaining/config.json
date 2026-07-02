@@ -1,0 +1,20 @@
+{
+  "stage": "P2 staged full SFT remaining split",
+  "initial_weight": "out/sft_vlm_600k_768.pth",
+  "source_dataset_rows": 2904511,
+  "excluded_trained_rows": 600000,
+  "excluded_validation_rows": 1000,
+  "remaining_train_rows": 2303511,
+  "epochs": 1,
+  "world_size": 4,
+  "batch_size_per_gpu": 4,
+  "gradient_accumulation": 4,
+  "effective_global_batch_size": 64,
+  "max_seq_len": 768,
+  "learning_rate": 0.000002,
+  "eval_interval_micro_steps": 1000,
+  "freeze_strategy": "SigLIP frozen; LLM and Vision Projector trainable",
+  "find_unused_parameters": true,
+  "nccl_p2p_disable": true,
+  "nccl_ib_disable": true
+}

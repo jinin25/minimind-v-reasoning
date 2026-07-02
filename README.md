@@ -141,11 +141,22 @@ flowchart LR
 
 真实图像的验证loss明显低于置空图和错配图，说明模型不仅接收到了视觉信号，也在使用与文本匹配的图像语义。
 
+### General VLM-SFT规模实验
+
+| 模型 | 训练样本 | 末20点平均loss | 固定验证loss | 256样本Real-image loss |
+|---|---:|---:|---:|---:|
+| Pretrain | 1,273,674 | - | - | 4.9485 |
+| SFT-30K | 30,000 | 3.44 | - | 4.0518 |
+| SFT-300K | 300,000 | 3.2149 | 3.5408 | - |
+| SFT-600K | 600,000 | 3.0104 | 3.3331 | 3.3800 |
+
+600K与300K从同一个Pretrain checkpoint初始化，使用相同固定验证集。600K将固定验证loss从3.5408降至3.3331，说明增加高质量通用SFT数据仍有明确收益。下一阶段从600K权重继续训练未见过的约230万条remaining数据，构成分阶段全量SFT。
+
 详细记录见 [EXPERIMENT_REPORT.md](./EXPERIMENT_REPORT.md)，后续安排见 [EXPERIMENT_PLAN.md](./EXPERIMENT_PLAN.md)。
 
 ## 当前效果
 
-当前已完成CoT数据工程和一轮Multimodal Pretrain。以下任务指标将在General SFT后于固定评测集上逐阶段补充：
+当前已完成CoT数据工程、Multimodal Pretrain以及30K/300K/600K General SFT规模实验。全量SFT采用“600K + 未见过的约230万remaining数据”分阶段完成。
 
 | 模型阶段 | 普通VQA | OCR | 计数 | 可验证推理 | 格式合规率 |
 |---|---:|---:|---:|---:|---:|

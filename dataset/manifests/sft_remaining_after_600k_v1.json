@@ -1,0 +1,9 @@
+{
+  "source": "dataset/sft_i2t.parquet",
+  "source_rows": 2904511,
+  "excluded_train_samples": 600000,
+  "excluded_validation_samples": 1000,
+  "remaining_samples": 2303511,
+  "seed": 20260702,
+  "excluded_indices_sha256": "3ee5d214cefd420e6c039cdc83a1b137876beb9af6954d6cd614121b601f6571"
+}
