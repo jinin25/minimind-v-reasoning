@@ -13,6 +13,7 @@ NCCL_P2P_DISABLE=1 NCCL_IB_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --data_path dataset/sft_i2t_600k.parquet \
   --val_data_path dataset/sft_i2t_val_1k.parquet \
   --from_weight pretrain_vlm \
+  --from_resume 1 \
   --epochs 1 \
   --batch_size 4 \
   --accumulation_steps 4 \
@@ -26,7 +27,7 @@ NCCL_P2P_DISABLE=1 NCCL_IB_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 \
   --save_weight sft_vlm_600k \
   --save_dir out \
   --checkpoint_dir checkpoints \
-  2>&1 | tee "$run_dir/train.log"
+  2>&1 | tee -a "$run_dir/train.log"
 
 sha256sum out/sft_vlm_600k_768.pth checkpoints/sft_vlm_600k_768_resume.pth > "$run_dir/SHA256SUMS"
 echo "completed" > "$run_dir/STATUS"
