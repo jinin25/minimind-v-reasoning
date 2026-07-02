@@ -1,0 +1,220 @@
+{
+  "smoke_training": {
+    "cot_smoke_rd0": {
+      "steps": 500,
+      "validation": [
+        [
+          100,
+          2.7771
+        ],
+        [
+          200,
+          2.7199
+        ],
+        [
+          300,
+          2.6988
+        ],
+        [
+          400,
+          2.6845
+        ],
+        [
+          500,
+          2.6759
+        ]
+      ],
+      "final_validation_loss": 2.6759
+    },
+    "cot_smoke_rd02": {
+      "steps": 500,
+      "validation": [
+        [
+          100,
+          2.7833
+        ],
+        [
+          200,
+          2.7279
+        ],
+        [
+          300,
+          2.7079
+        ],
+        [
+          400,
+          2.6932
+        ],
+        [
+          500,
+          2.6837
+        ]
+      ],
+      "final_validation_loss": 2.6837
+    }
+  },
+  "generation": {
+    "rd02_cot_off.json": {
+      "weight": "cot_smoke_rd02",
+      "reasoning": "off",
+      "overall": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.24441084659516096,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.245
+      },
+      "by_category": {
+        "cot_reasoning": {
+          "samples": 200,
+          "accuracy": 0.0,
+          "token_f1": 0.24441084659516096,
+          "think_rate": 0.0,
+          "answer_format_rate": 0.245
+        }
+      }
+    },
+    "rd02_cot_on.json": {
+      "weight": "cot_smoke_rd02",
+      "reasoning": "on",
+      "overall": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.21591908252756353,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.215
+      },
+      "by_category": {
+        "cot_reasoning": {
+          "samples": 200,
+          "accuracy": 0.0,
+          "token_f1": 0.21591908252756353,
+          "think_rate": 0.0,
+          "answer_format_rate": 0.215
+        }
+      }
+    },
+    "rd02_general.json": {
+      "weight": "cot_smoke_rd02",
+      "reasoning": "off",
+      "overall": {
+        "samples": 327,
+        "accuracy": 0.0030581039755351682,
+        "token_f1": 0.24010596119745412,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.21406727828746178
+      },
+      "by_category": {
+        "short_answer": {
+          "samples": 100,
+          "accuracy": 0.01,
+          "token_f1": 0.22684750824078026,
+          "think_rate": 0.0,
+          "answer_format_rate": 0.33
+        },
+        "vqa": {
+          "samples": 100,
+          "accuracy": 0.0,
+          "token_f1": 0.2518488158254402,
+          "think_rate": 0.0,
+          "answer_format_rate": 0.17
+        },
+        "ocr": {
+          "samples": 100,
+          "accuracy": 0.0,
+          "token_f1": 0.2539289529430423,
+          "think_rate": 0.0,
+          "answer_format_rate": 0.16
+        },
+        "counting": {
+          "samples": 27,
+          "accuracy": 0.0,
+          "token_f1": 0.19452302261633939,
+          "think_rate": 0.0,
+          "answer_format_rate": 0.14814814814814814
+        }
+      }
+    },
+    "rd0_cot_off.json": {
+      "weight": "cot_smoke_rd0",
+      "reasoning": "off",
+      "overall": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.24895298000807306,
+        "think_rate": 0.035,
+        "answer_format_rate": 0.325
+      },
+      "by_category": {
+        "cot_reasoning": {
+          "samples": 200,
+          "accuracy": 0.0,
+          "token_f1": 0.24895298000807306,
+          "think_rate": 0.035,
+          "answer_format_rate": 0.325
+        }
+      }
+    },
+    "rd0_cot_on.json": {
+      "weight": "cot_smoke_rd0",
+      "reasoning": "on",
+      "overall": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.23665930888904507,
+        "think_rate": 0.01,
+        "answer_format_rate": 0.095
+      },
+      "by_category": {
+        "cot_reasoning": {
+          "samples": 200,
+          "accuracy": 0.0,
+          "token_f1": 0.23665930888904507,
+          "think_rate": 0.01,
+          "answer_format_rate": 0.095
+        }
+      }
+    },
+    "rd0_general.json": {
+      "weight": "cot_smoke_rd0",
+      "reasoning": "off",
+      "overall": {
+        "samples": 327,
+        "accuracy": 0.0061162079510703364,
+        "token_f1": 0.24478457148685076,
+        "think_rate": 0.03058103975535168,
+        "answer_format_rate": 0.18960244648318042
+      },
+      "by_category": {
+        "short_answer": {
+          "samples": 100,
+          "accuracy": 0.01,
+          "token_f1": 0.22252150782012833,
+          "think_rate": 0.03,
+          "answer_format_rate": 0.31
+        },
+        "vqa": {
+          "samples": 100,
+          "accuracy": 0.0,
+          "token_f1": 0.2645962800015271,
+          "think_rate": 0.0,
+          "answer_format_rate": 0.1
+        },
+        "ocr": {
+          "samples": 100,
+          "accuracy": 0.0,
+          "token_f1": 0.26018722867107696,
+          "think_rate": 0.03,
+          "answer_format_rate": 0.14
+        },
+        "counting": {
+          "samples": 27,
+          "accuracy": 0.037037037037037035,
+          "token_f1": 0.19681678618248122,
+          "think_rate": 0.14814814814814814,
+          "answer_format_rate": 0.25925925925925924
+        }
+      }
+    }
+  }
+}

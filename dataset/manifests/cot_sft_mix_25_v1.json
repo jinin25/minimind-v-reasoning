@@ -1,0 +1,11 @@
+{
+  "source_cot_rows": 186094,
+  "unique_cot_rows": 186023,
+  "duplicate_cot_rows": 71,
+  "cot_validation_rows": 1000,
+  "cot_train_rows": 185023,
+  "general_replay_rows": 61675,
+  "mixed_train_rows": 246698,
+  "general_replay_fraction": 0.2500020267695725,
+  "seed": 20260702
+}

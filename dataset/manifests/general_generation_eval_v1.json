@@ -1,0 +1,12 @@
+{
+  "source": "dataset/sft_i2t_val_1k.parquet",
+  "output": "dataset/general_generation_eval.parquet",
+  "rows": 327,
+  "categories": {
+    "vqa": 100,
+    "ocr": 100,
+    "counting": 27,
+    "short_answer": 100
+  },
+  "immutable_seed": "source-row-order-v1"
+}
