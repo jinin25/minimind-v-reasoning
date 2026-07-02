@@ -1,4 +1,4 @@
-"""Plot smoothed 300K/600K SFT training loss and fixed validation loss."""
+"""Plot SFT scale ablations and the staged full-data continuation."""
 
 import re
 from pathlib import Path
@@ -23,20 +23,26 @@ def smooth(values, window=21):
 
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), dpi=160)
-colors = {"SFT-300K": "#2878B5", "SFT-600K": "#C82423"}
-for label, run in [("SFT-300K", "p2_sft_300k"), ("SFT-600K", "p2_sft_600k")]:
+colors = {"SFT-300K": "#2878B5", "SFT-600K": "#C82423", "Full continuation": "#2E8B57"}
+for label, run, offset in [
+    ("SFT-300K", "p2_sft_300k", 0),
+    ("SFT-600K", "p2_sft_600k", 0),
+    ("Full continuation", "p2_sft_remaining", 37500),
+]:
     steps, losses, validation = parse(f"experiment_runs/{run}/train.log")
+    steps = steps + offset
     averaged, window = smooth(losses)
     axes[0].plot(steps[window - 1 :], averaged, label=label, color=colors[label], linewidth=2)
-    val_steps = sorted(validation)
-    axes[1].plot(val_steps, [validation[s] for s in val_steps], label=label, color=colors[label], linewidth=2)
+    raw_val_steps = sorted(validation)
+    val_steps = [step + offset for step in raw_val_steps]
+    axes[1].plot(val_steps, [validation[s] for s in raw_val_steps], label=label, color=colors[label], linewidth=2)
 
 axes[0].set(title="Smoothed training loss", xlabel="Micro-step", ylabel="Cross-entropy loss")
 axes[1].set(title="Fixed validation loss", xlabel="Micro-step", ylabel="Cross-entropy loss")
 for axis in axes:
     axis.grid(alpha=0.22)
     axis.legend(frameon=False)
-fig.suptitle("General VLM-SFT: 300K vs 600K")
+fig.suptitle("General VLM-SFT scale and staged full continuation")
 fig.tight_layout()
 output = Path("experiment_runs/p2_sft_comparison.png")
 fig.savefig(output, bbox_inches="tight")

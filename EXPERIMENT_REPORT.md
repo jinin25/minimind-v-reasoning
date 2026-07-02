@@ -1,6 +1,6 @@
 # MiniMind-V-Reasoning Experiment Report
 
-本文只记录影响模型能力结论的主要实验与消融。环境校准、脚本修复、路径调整和冒烟测试不作为独立实验。
+本文详细记录影响模型能力结论的主要实验与消融结果。
 
 ## 1. 实验总览
 
@@ -9,7 +9,7 @@
 | E1 | CoT数据蒸馏 | 四卡异步教师生成 | 已完成 |
 | E2 | CoT质量清洗 | 是否过滤模板化元推理 | 已完成 |
 | E3 | Multimodal Pretrain | 真实图像 vs 全零图像 vs 错配图像 | 已完成 |
-| E4 | General VLM-SFT | 30–60万分层数据 vs 全量数据 | 待实验 |
+| E4 | General VLM-SFT | 30–60万分层数据 vs 分阶段全量数据 | 已完成 |
 | E5 | CoT-SFT | 无CoT vs CoT；Dropout 0 vs 0.2 | 待实验 |
 | E6 | Rule-based GRPO | SFT策略 vs GRPO策略 | 待实验 |
 
@@ -135,7 +135,7 @@
 
 验证通用SFT数据规模从300K增加到600K是否继续改善泛化。两个正式组均从同一个Pretrain checkpoint初始化，使用相同训练配置与固定验证集；600K集合完整包含300K集合。
 
-![General VLM-SFT 300K vs 600K](./experiment_runs/p2_sft_comparison.png)
+![General VLM-SFT scale and staged full continuation](./experiment_runs/p2_sft_comparison.png)
 
 ### 结果
 
@@ -145,12 +145,15 @@
 | SFT-30K Smoke | 30,000 | 3.44 | - | 4.0518 |
 | SFT-300K | 300,000 | 3.2149 | 3.5408 | - |
 | SFT-600K | 600,000 | 3.0104 | 3.3331 | 3.3800 |
+| SFT-Full（600K续训） | +2,303,511未见样本 | 2.7593 | 3.0263 | 3.0692 |
 
 600K相对300K将固定验证loss降低0.2077（5.87%）。在同一256条样本上，SFT-600K的Zero-image loss为3.6263，Shuffled-image loss为3.6196，均高于Real-image loss 3.3800，视觉依赖仍然保留。
 
+分阶段全量续训完成143,970步，耗时10小时57分，平均吞吐58.86 samples/s，峰值显存4.59 GB/卡。最终固定验证loss为3.0263，相对600K进一步降低0.3068（9.20%），相对300K降低0.5145（14.53%）。最终模型在同一256条样本上的Zero-image与Shuffled-image loss分别为3.3161和3.3081，较Real-image 3.0692增加0.2469和0.2388。
+
 ### 结论
 
-增加到600K不仅降低训练loss，也持续降低固定验证loss，没有出现明显过拟合。数据规模收益成立，因此最终模型采用分阶段全量训练：从SFT-600K权重出发，只训练其余未见过的2,303,511条样本，避免重复加权前600K。该结果用于最终模型构建，不作为与300K/600K严格同初始化的Full消融。
+增加到600K不仅降低训练loss，也持续降低固定验证loss，没有出现明显过拟合。分阶段全量训练进一步改善固定验证loss，同时保留对匹配图像的依赖。由于Full从SFT-600K继续训练，它代表最终模型构建结果，不是与300K/600K严格同初始化的独立规模消融；对Full能力的最终判断还需要生成式任务准确率，不能只依据token loss。
 
 ## 6. E5：CoT-SFT与Reasoning Dropout
 
@@ -172,7 +175,7 @@
 |---|---:|---:|---:|---:|---:|---:|
 | Reason LLM | 待测 | 待测 | 待测 | 待测 | - | 待测 |
 | + Pretrain | SFT后评测 | SFT后评测 | SFT后评测 | - | loss +20.62% | - |
-| + General SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+| + General SFT | 待生成评测 | 待生成评测 | 待生成评测 | 待生成评测 | loss +7.78% | 待生成评测 |
 | + CoT-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
 | + Reasoning Dropout | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
 | + GRPO | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |

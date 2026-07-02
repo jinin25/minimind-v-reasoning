@@ -22,24 +22,29 @@
 
 验收结果：训练loss稳定下降；Real Image loss 3.0470，Zero 3.7419，Shuffled 3.6754；权重已严格加载并完成消融。
 
-## Phase 2：General VLM-SFT（下一阶段）
+## Phase 2：General VLM-SFT（已完成）
 
-- [ ] 建立固定SFT验证集，按语言和任务类型统计分布
-- [ ] 生成30K工程冒烟集、300K主实验集和600K规模消融集
-- [ ] 将Pretrain的DDP屏障与NCCL稳定配置复用到SFT
-- [ ] 30K只做短程稳定性、过拟合和评测链路检查，不作为正式结果
-- [ ] SFT-300K：正式基线，1 epoch，max length 768
-- [ ] SFT-600K：仅在300K指标有效后运行，用于数据规模消融
-- [ ] SFT-Full：仅在600K继续显著优于300K时，作为最终上限实验
+- [x] 建立固定1,000条SFT验证集并从训练数据排除
+- [x] 生成30K工程冒烟集、300K主实验集和600K规模消融集
+- [x] 将Pretrain的DDP屏障与NCCL稳定配置复用到SFT
+- [x] 完成30K工程冒烟，不作为正式结论
+- [x] 完成SFT-300K正式基线，1 epoch，max length 768
+- [x] 完成SFT-600K规模消融
+- [x] 从600K继续训练未见过的2,303,511条数据，完成分阶段全量SFT
+- [x] 保存最终权重、resume checkpoint、配置、指标与SHA-256
 
-验收：视觉描述、OCR、计数和短问答可正常生成；Real Image优于Zero/Shuffled；300K相对Pretrain取得明确收益。
+验收结果：全量阶段完成143,970/143,970步，固定验证loss降至3.0263；256条消融中Real/Zero/Shuffled分别为3.0692/3.3161/3.3081，视觉语义依赖得到保留。
 
 ## Phase 3：CoT-SFT
 
-- 186,094条clean CoT
-- 混合20–30%普通SFT防止遗忘
-- 2 epochs，max length 1024
-- 对比Reasoning Dropout 0与0.2
+- [ ] 先对全量SFT进行固定生成式基线评测，覆盖VQA、OCR、计数和短答案
+- [ ] 对186,094条clean CoT去重，并混合20–30%普通SFT replay防止遗忘
+- [ ] 运行100–500 step冒烟，确认1024长度下的batch、显存、格式与恢复链路
+- [ ] 从同一全量SFT权重运行CoT-SFT（Reasoning Dropout=0）
+- [ ] 运行严格同配置的Reasoning Dropout=0.2消融
+- [ ] 比较推理准确率、普通VQA保持率、reasoning-on/off与格式合规率
+
+建议正式配置：2 epochs、max length 1024、learning rate 1e-6～2e-6；先以实测显存确定有效全局batch 32或64。只有固定生成评测链路完成后才启动正式CoT对照，避免只凭loss判断推理能力。
 
 验收：推理任务提升；普通VQA下降受控；无思考模式仍能输出答案。
 

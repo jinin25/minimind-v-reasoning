@@ -1,0 +1,10 @@
+{
+  "samples": 256,
+  "real_image_loss": 3.0692408941686153,
+  "zero_image_loss": 3.316137671470642,
+  "shuffled_image_loss": 3.3080777898430824,
+  "zero_minus_real": 0.24689677730202675,
+  "shuffled_minus_real": 0.2388368956744671,
+  "uses_visual_signal": true,
+  "uses_matched_visual_semantics": true
+}

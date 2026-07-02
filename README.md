@@ -115,15 +115,6 @@ flowchart LR
 - 保留率：62.03%
 - 格式错误、空答案、损坏图片：0
 
-### 模型兼容与视觉链路
-
-- `reason_768.pth` 147个tensor严格匹配
-- Shape mismatch：0
-- Unexpected keys：0
-- 文本前向测试通过
-- SigLIP P32单图forward/backward通过
-- Vision Projector梯度非零
-
 ### Multimodal Pretrain
 
 | 指标 | 结果 |
@@ -149,14 +140,15 @@ flowchart LR
 | SFT-30K | 30,000 | 3.44 | - | 4.0518 |
 | SFT-300K | 300,000 | 3.2149 | 3.5408 | - |
 | SFT-600K | 600,000 | 3.0104 | 3.3331 | 3.3800 |
+| SFT-Full（600K续训） | +2,303,511未见样本 | 2.7593 | 3.0263 | 3.0692 |
 
-600K与300K从同一个Pretrain checkpoint初始化，使用相同固定验证集。600K将固定验证loss从3.5408降至3.3331，说明增加高质量通用SFT数据仍有明确收益。下一阶段从600K权重继续训练未见过的约230万条remaining数据，构成分阶段全量SFT。
+600K与300K从同一个Pretrain checkpoint初始化，使用相同固定验证集。600K将固定验证loss从3.5408降至3.3331。随后从600K权重继续训练未见过的2,303,511条数据，最终固定验证loss降至3.0263，相对600K再降低9.20%。最终模型的Zero/Shuffled loss为3.3161/3.3081，均高于Real loss 3.0692，说明全量SFT后仍保留匹配视觉语义依赖。
 
 详细记录见 [EXPERIMENT_REPORT.md](./EXPERIMENT_REPORT.md)，后续安排见 [EXPERIMENT_PLAN.md](./EXPERIMENT_PLAN.md)。
 
 ## 当前效果
 
-当前已完成CoT数据工程、Multimodal Pretrain以及30K/300K/600K General SFT规模实验。全量SFT采用“600K + 未见过的约230万remaining数据”分阶段完成。
+当前已完成CoT数据工程、Multimodal Pretrain、30K/300K/600K General SFT规模实验与分阶段全量SFT。下一阶段先建立固定生成式基线，再运行CoT-SFT与Reasoning Dropout对照。
 
 | 模型阶段 | 普通VQA | OCR | 计数 | 可验证推理 | 格式合规率 |
 |---|---:|---:|---:|---:|---:|
