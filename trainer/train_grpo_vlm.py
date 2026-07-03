@@ -180,11 +180,15 @@ class RLInnovatorVLDataset(Dataset):
                 + "<answer>final answer</answer>"
             )
         messages = [{"role": "user", "content": prompt_text}]
-        return self.tokenizer.apply_chat_template(
+        prompt = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=True,
         )
+        empty_think = "<think>\n\n</think>\n\n"
+        if not prompt.endswith(empty_think):
+            raise ValueError("chat template no longer ends with the expected empty think block")
+        return prompt[:-len(empty_think)] + "<think>\n"
 
     def _build_image_data(self, images_field):
         image_bytes = []
@@ -501,7 +505,10 @@ def evaluate_reward(model, loader, tokenizer, rewarder, args, max_steps=20):
                 pad_token_id=tokenizer.pad_token_id,
             )
             completion_ids = outputs[:, input_ids.size(1):]
-            completions = tokenizer.batch_decode(completion_ids, skip_special_tokens=True)
+            completions = [
+                "<think>\n" + text
+                for text in tokenizer.batch_decode(completion_ids, skip_special_tokens=True)
+            ]
 
             for i, completion in enumerate(completions):
                 r = rewarder.score(
@@ -581,7 +588,10 @@ def train_one_epoch(
                 n_keep=gen_len,
             )
 
-        completions = tokenizer.batch_decode(all_completion_ids, skip_special_tokens=True)
+        completions = [
+            "<think>\n" + text
+            for text in tokenizer.batch_decode(all_completion_ids, skip_special_tokens=True)
+        ]
         rewards_list = []
         for k in range(args.num_generations):
             for i in range(input_ids.size(0)):
@@ -625,7 +635,8 @@ def train_one_epoch(
         else:
             loss.backward()
 
-        if (step + 1) % args.accumulation_steps == 0:
+        update_now = step % args.accumulation_steps == 0 or step == len(loader)
+        if update_now:
             if args.grad_clip > 0:
                 if use_scaler:
                     scaler.unscale_(optimizer)
@@ -646,6 +657,7 @@ def train_one_epoch(
                 f"policy_loss: {policy_loss.item():.4f}, "
                 f"aux_loss: {float(aux_loss):.4f}, "
                 f"reward: {rewards.mean().item():.4f}, "
+                f"reward_std: {rewards.std().item():.4f}, "
                 f"resp_len: {completion_mask.sum(dim=1).float().mean().item():.2f}, "
                 f"lr: {current_lr:.8f}"
             )
@@ -657,6 +669,7 @@ def train_one_epoch(
                         "policy_loss": policy_loss.item(),
                         "aux_loss": float(aux_loss),
                         "reward": rewards.mean().item(),
+                        "reward_std": rewards.std().item(),
                         "advantages_mean": advantages_flat.mean().item(),
                         "avg_response_len": completion_mask.sum(dim=1).float().mean().item(),
                         "learning_rate": current_lr,

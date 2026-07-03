@@ -10,7 +10,7 @@
 | E2 | CoT质量清洗 | 是否过滤模板化元推理 | 已完成 |
 | E3 | Multimodal Pretrain | 真实图像 vs 全零图像 vs 错配图像 | 已完成 |
 | E4 | General VLM-SFT | 30–60万分层数据 vs 分阶段全量数据 | 已完成 |
-| E5 | CoT-SFT | 无CoT vs CoT；Dropout 0 vs 0.2 | 待实验 |
+| E5 | CoT-SFT | 无CoT vs CoT；Dropout 0 vs 0.2 | 已完成 |
 | E6 | Rule-based GRPO | SFT策略 vs GRPO策略 | 待实验 |
 
 ## 2. E1：CoT数据蒸馏
@@ -157,17 +157,33 @@
 
 ## 6. E5：CoT-SFT与Reasoning Dropout
 
-| 组别 | CoT | Dropout | 目的 |
-|---|---|---:|---|
-| General SFT | 无 | 0 | 基线 |
-| CoT-SFT | 有 | 0 | 测量CoT注入收益 |
-| CoT-SFT + RD | 有 | 0.2 | 测量模板依赖与泛化变化 |
+### 设置
 
-比较可验证推理准确率、普通VQA保持率、reasoning-on/off结果和格式合规率。
+严格清洗后的186,094条CoT中发现71条重复；去重后留出1,000条固定CoT验证集，剩余185,023条用于训练。为缓解通用能力遗忘，确定性加入61,675条General SFT replay，最终训练集246,698条，replay比例25%。两组均从同一`SFT-Full`权重初始化，训练2 epochs，max length 1024，有效全局batch 64，学习率2e-6；唯一变量为Reasoning Dropout。
+
+| 组别 | Dropout | 末20点平均训练loss | 最优固定验证loss | 耗时 | 峰值显存 |
+|---|---:|---:|---:|---:|---:|
+| CoT-SFT RD=0 | 0 | 2.5871 | 2.5152 | 2小时44分 | 5.26 GB/卡 |
+| CoT-SFT RD=0.2 | 0.2 | 2.6260 | 2.5243 | 2小时44分 | 5.26 GB/卡 |
+
+### 固定生成评测
+
+General保持集包含VQA 100、OCR 100、计数27、短答案100；CoT集固定评测200条。General答案多为长自由文本，严格exact match接近零且不代表真实正确率，因此本阶段以token F1作相对比较，后续GRPO改用具有唯一短答案的可验证数据。
+
+| 模型 | General token F1 | CoT reasoning-off F1 | CoT reasoning-on F1 | reasoning-on think完整率 |
+|---|---:|---:|---:|---:|
+| CoT-SFT RD=0 | 0.2420 | 0.2519 | 0.2280 | 76% |
+| CoT-SFT RD=0.2 | 0.2274 | 0.2625 | 0.2316 | 83% |
+
+reasoning-on评测必须将聊天模板末尾默认的空`<think></think>`改为开放的`<think>`再生成。早期评测未处理这一模板行为，导致think率被误报为0；表中使用修正后的口径。128-token生成上限下完整answer闭合率约10%，大量长回答在结束标签前被截断，因此该数字不作为模型格式能力的最终结论。
+
+### 结论
+
+RD=0取得更低的训练/验证loss，并更好地保持General生成内容；RD=0.2在reasoning-on think完整率和reasoning-off CoT F1上更优，符合随机丢弃对双模式鲁棒性的预期。两组不存在单指标全面胜出：RD=0保留为通用基线，RD=0.2作为规则奖励GRPO的初始化分支，用短答案奖励进一步约束格式与决策。
 
 ## 7. E6：Rule-based GRPO
 
-从1,000条可验证任务开始，确认reward方差、KL和答案准确率变化后扩展到5,000及10,000–20,000条。最终对比同一CoT-SFT checkpoint在GRPO前后的准确率，而不是只比较格式奖励。
+G0从RD=0.2初始化，使用1,000条RL_Innovator-VL可验证样本，确认reward方差、KL、格式率和答案准确率变化后，再决定是否扩展到5,000及10,000–20,000条。最终比较同一checkpoint在GRPO前后的准确率，而不是只比较格式奖励。
 
 ## 8. 最终结果表
 
@@ -176,6 +192,6 @@
 | Reason LLM | 待测 | 待测 | 待测 | 待测 | - | 待测 |
 | + Pretrain | SFT后评测 | SFT后评测 | SFT后评测 | - | loss +20.62% | - |
 | + General SFT | 待生成评测 | 待生成评测 | 待生成评测 | 待生成评测 | loss +7.78% | 待生成评测 |
-| + CoT-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
-| + Reasoning Dropout | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+| + CoT-SFT | F1 0.2386 | F1 0.2486 | F1 0.1978 | CoT F1 0.2280 | 待复测 | think 76% |
+| + Reasoning Dropout | F1 0.2040 | F1 0.2393 | F1 0.1854 | CoT F1 0.2316 | 待复测 | think 83% |
 | + GRPO | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |

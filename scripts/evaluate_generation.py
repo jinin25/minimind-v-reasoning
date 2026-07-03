@@ -40,13 +40,22 @@ for i in range(n):
     instruction = "\n请先在<think>中简短思考，再在<answer>中给出答案。" if args.reasoning == "on" else "\n只给出最终答案，不要展示思考过程。"
     content = user.replace("<image>", cfg.image_special_token * cfg.image_token_len) + instruction
     prompt = tok.apply_chat_template([{"role":"user","content":content}], tokenize=False, add_generation_prompt=True)
+    # The MiniMind chat template ends generation prompts with an empty think block.
+    # Open that block for reasoning-on evaluation; keep it empty for reasoning-off.
+    reasoning_prefix = ""
+    if args.reasoning == "on":
+        empty_think = "<think>\n\n</think>\n\n"
+        if not prompt.endswith(empty_think):
+            raise ValueError("chat template no longer ends with the expected empty think block")
+        prompt = prompt[:-len(empty_think)] + "<think>\n"
+        reasoning_prefix = "<think>\n"
     inputs = tok(prompt, return_tensors="pt", truncation=True, max_length=896).to(args.device)
     raw = t["image_bytes"][i].as_py(); raw = raw[0] if isinstance(raw, list) else raw
     pixels = {k:v.to(args.device) for k,v in MiniMindVLM.image2tensor(Image.open(io.BytesIO(raw)), processor).items()}
     with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
         out = model.generate(inputs.input_ids, attention_mask=inputs.attention_mask, pixel_values=pixels,
                              do_sample=False, max_new_tokens=args.max_new_tokens, pad_token_id=tok.pad_token_id, eos_token_id=tok.eos_token_id)
-    pred = tok.decode(out[0, inputs.input_ids.shape[1]:], skip_special_tokens=True)
+    pred = reasoning_prefix + tok.decode(out[0, inputs.input_ids.shape[1]:], skip_special_tokens=True)
     ref = t["reference"][i].as_py() if "reference" in t.column_names else next(x["content"] for x in messages if x["role"] == "assistant")
     kind = t["category"][i].as_py() if "category" in t.column_names else "cot_reasoning"
     exact = canonical(pred) == canonical(ref); score=f1(answer_text(pred), answer_text(ref))

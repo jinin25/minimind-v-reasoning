@@ -35,27 +35,29 @@
 
 验收结果：全量阶段完成143,970/143,970步，固定验证loss降至3.0263；256条消融中Real/Zero/Shuffled分别为3.0692/3.3161/3.3081，视觉语义依赖得到保留。
 
-## Phase 3：CoT-SFT
+## Phase 3：CoT-SFT（已完成）
 
-- [ ] 先对全量SFT进行固定生成式基线评测，覆盖VQA、OCR、计数和短答案
-- [ ] 对186,094条clean CoT去重，并混合20–30%普通SFT replay防止遗忘
-- [ ] 运行100–500 step冒烟，确认1024长度下的batch、显存、格式与恢复链路
-- [ ] 从同一全量SFT权重运行CoT-SFT（Reasoning Dropout=0）
-- [ ] 运行严格同配置的Reasoning Dropout=0.2消融
-- [ ] 比较推理准确率、普通VQA保持率、reasoning-on/off与格式合规率
+- [x] 建立固定General生成评测，覆盖VQA、OCR、计数和短答案
+- [x] 对186,094条clean CoT去重，留出1,000条验证集并混入25%普通SFT replay
+- [x] 完成两组500 step冒烟测试
+- [x] 从同一全量SFT权重完成CoT-SFT（Reasoning Dropout=0）
+- [x] 完成严格同配置的Reasoning Dropout=0.2消融
+- [x] 比较固定验证loss、General保持、reasoning-on/off与格式合规率
 
 建议正式配置：2 epochs、max length 1024、learning rate 1e-6～2e-6；先以实测显存确定有效全局batch 32或64。只有固定生成评测链路完成后才启动正式CoT对照，避免只凭loss判断推理能力。
 
-验收：推理任务提升；普通VQA下降受控；无思考模式仍能输出答案。
+结论：RD=0通用保持更好；RD=0.2的reasoning-on think完整率和reasoning-off CoT F1更高。保留两者，并以RD=0.2进入GRPO G0。
 
 ## Phase 4：Rule-based GRPO
 
-- G0：1,000条可验证任务冒烟
+- [ ] G0：从RD=0.2初始化，运行1,000条RL_Innovator-VL可验证任务冒烟（数据下载/启动中）
 - G1：5,000条低难度任务
 - G2：10,000–20,000条混合任务
 - 任务：选择题、数字、OCR、短字符串
 
 验收：reward方差非零；退化组比例受控；答案准确率而非仅格式分提升；KL稳定。
+
+G0结束后先做同一固定RL验证集的GRPO前后比较。若reward仅由格式分驱动、答案准确率不升或KL异常，则停止扩量并修正reward；通过后才运行G1。
 
 ## Phase 5：最终评估
 

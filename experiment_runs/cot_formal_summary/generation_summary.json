@@ -1,0 +1,204 @@
+{
+  "rd02_cot_off.json": {
+    "weight": "cot_sft_rd02",
+    "reasoning": "off",
+    "overall": {
+      "samples": 200,
+      "accuracy": 0.0,
+      "token_f1": 0.26247761073624376,
+      "think_rate": 0.0,
+      "answer_format_rate": 0.1
+    },
+    "by_category": {
+      "cot_reasoning": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.26247761073624376,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.1
+      }
+    }
+  },
+  "rd02_cot_on.json": {
+    "weight": "cot_sft_rd02",
+    "reasoning": "on",
+    "overall": {
+      "samples": 200,
+      "accuracy": 0.0,
+      "token_f1": 0.26085963834109943,
+      "think_rate": 0.0,
+      "answer_format_rate": 0.135
+    },
+    "by_category": {
+      "cot_reasoning": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.26085963834109943,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.135
+      }
+    }
+  },
+  "rd02_general_off.json": {
+    "weight": "cot_sft_rd02",
+    "reasoning": "off",
+    "overall": {
+      "samples": 327,
+      "accuracy": 0.0,
+      "token_f1": 0.2273721514303659,
+      "think_rate": 0.0,
+      "answer_format_rate": 0.11926605504587157
+    },
+    "by_category": {
+      "short_answer": {
+        "samples": 100,
+        "accuracy": 0.0,
+        "token_f1": 0.25013430360616146,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.17
+      },
+      "vqa": {
+        "samples": 100,
+        "accuracy": 0.0,
+        "token_f1": 0.20398604840400758,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.16
+      },
+      "ocr": {
+        "samples": 100,
+        "accuracy": 0.0,
+        "token_f1": 0.23932155032583804,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.04
+      },
+      "counting": {
+        "samples": 27,
+        "accuracy": 0.0,
+        "token_f1": 0.18542604756033207,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.07407407407407407
+      }
+    }
+  },
+  "rd0_cot_off.json": {
+    "weight": "cot_sft_rd0",
+    "reasoning": "off",
+    "overall": {
+      "samples": 200,
+      "accuracy": 0.0,
+      "token_f1": 0.2518525045613889,
+      "think_rate": 0.0,
+      "answer_format_rate": 0.095
+    },
+    "by_category": {
+      "cot_reasoning": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.2518525045613889,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.095
+      }
+    }
+  },
+  "rd0_cot_on.json": {
+    "weight": "cot_sft_rd0",
+    "reasoning": "on",
+    "overall": {
+      "samples": 200,
+      "accuracy": 0.0,
+      "token_f1": 0.25501953072641753,
+      "think_rate": 0.0,
+      "answer_format_rate": 0.09
+    },
+    "by_category": {
+      "cot_reasoning": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.25501953072641753,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.09
+      }
+    }
+  },
+  "rd0_general_off.json": {
+    "weight": "cot_sft_rd0",
+    "reasoning": "off",
+    "overall": {
+      "samples": 327,
+      "accuracy": 0.0030581039755351682,
+      "token_f1": 0.24198129213149155,
+      "think_rate": 0.0,
+      "answer_format_rate": 0.10091743119266056
+    },
+    "by_category": {
+      "short_answer": {
+        "samples": 100,
+        "accuracy": 0.01,
+        "token_f1": 0.25066289783584933,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.16
+      },
+      "vqa": {
+        "samples": 100,
+        "accuracy": 0.0,
+        "token_f1": 0.2386376312539339,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.09
+      },
+      "ocr": {
+        "samples": 100,
+        "accuracy": 0.0,
+        "token_f1": 0.24856425744493854,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.05
+      },
+      "counting": {
+        "samples": 27,
+        "accuracy": 0.0,
+        "token_f1": 0.19782977309353889,
+        "think_rate": 0.0,
+        "answer_format_rate": 0.1111111111111111
+      }
+    }
+  },
+  "rd0_cot_on_v2.json": {
+    "weight": "cot_sft_rd0",
+    "reasoning": "on",
+    "overall": {
+      "samples": 200,
+      "accuracy": 0.0,
+      "token_f1": 0.2280249897180116,
+      "think_rate": 0.76,
+      "answer_format_rate": 0.1
+    },
+    "by_category": {
+      "cot_reasoning": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.2280249897180116,
+        "think_rate": 0.76,
+        "answer_format_rate": 0.1
+      }
+    }
+  },
+  "rd02_cot_on_v2.json": {
+    "weight": "cot_sft_rd02",
+    "reasoning": "on",
+    "overall": {
+      "samples": 200,
+      "accuracy": 0.0,
+      "token_f1": 0.23160491389050147,
+      "think_rate": 0.83,
+      "answer_format_rate": 0.095
+    },
+    "by_category": {
+      "cot_reasoning": {
+        "samples": 200,
+        "accuracy": 0.0,
+        "token_f1": 0.23160491389050147,
+        "think_rate": 0.83,
+        "answer_format_rate": 0.095
+      }
+    }
+  }
+}

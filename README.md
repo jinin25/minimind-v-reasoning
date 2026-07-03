@@ -144,18 +144,29 @@ flowchart LR
 
 600K与300K从同一个Pretrain checkpoint初始化，使用相同固定验证集。600K将固定验证loss从3.5408降至3.3331。随后从600K权重继续训练未见过的2,303,511条数据，最终固定验证loss降至3.0263，相对600K再降低9.20%。最终模型的Zero/Shuffled loss为3.3161/3.3081，均高于Real loss 3.0692，说明全量SFT后仍保留匹配视觉语义依赖。
 
+### CoT-SFT与Reasoning Dropout
+
+CoT训练使用185,023条去重训练样本与61,675条General replay（25%），两组均从同一SFT-Full权重训练2 epochs。
+
+| 模型 | 固定验证loss | General token F1 | CoT reasoning-off F1 | CoT reasoning-on F1 | think完整率 |
+|---|---:|---:|---:|---:|---:|
+| CoT-SFT RD=0 | 2.5152 | 0.2420 | 0.2519 | 0.2280 | 76% |
+| CoT-SFT RD=0.2 | 2.5243 | 0.2274 | 0.2625 | 0.2316 | 83% |
+
+RD=0更好地保持通用生成能力，RD=0.2在有/无思考模式之间更稳健。项目保留RD=0作为通用基线，并选择RD=0.2进入1,000条规则奖励GRPO冒烟。
+
 详细记录见 [EXPERIMENT_REPORT.md](./EXPERIMENT_REPORT.md)，后续安排见 [EXPERIMENT_PLAN.md](./EXPERIMENT_PLAN.md)。
 
 ## 当前效果
 
-当前已完成CoT数据工程、Multimodal Pretrain、30K/300K/600K General SFT规模实验与分阶段全量SFT。下一阶段先建立固定生成式基线，再运行CoT-SFT与Reasoning Dropout对照。
+当前已完成CoT数据工程、Multimodal Pretrain、分阶段全量General SFT，以及CoT-SFT RD=0/0.2严格对照。下一阶段为1,000条可验证短答案GRPO冒烟。
 
 | 模型阶段 | 普通VQA | OCR | 计数 | 可验证推理 | 格式合规率 |
 |---|---:|---:|---:|---:|---:|
 | Reason LLM（无视觉） | - | - | - | 待测 | 待测 |
 | Multimodal Pretrain | 尚不适合生成式评测 | 尚不适合生成式评测 | 尚不适合生成式评测 | - | - |
-| General VLM-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
-| CoT-SFT | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+| General VLM-SFT | 已完成固定生成评测 | 已完成固定生成评测 | 已完成固定生成评测 | - | - |
+| CoT-SFT | F1 0.2386 | F1 0.2486 | F1 0.1978 | CoT F1 0.2280 | think 76% |
 | CoT-SFT + GRPO | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
 
 ## 主要文件
