@@ -562,8 +562,21 @@ def train_one_epoch(
             args=args,
         )
 
-        all_outputs = torch.cat(outputs_list, dim=0)
-        all_completion_ids = torch.cat(completion_ids_list, dim=0)
+        max_completion_len = max(x.size(1) for x in completion_ids_list)
+        fill_id = tokenizer.eos_token_id
+        if fill_id is None:
+            fill_id = tokenizer.pad_token_id
+        padded_completions = []
+        padded_outputs = []
+        for completion_ids in completion_ids_list:
+            pad_len = max_completion_len - completion_ids.size(1)
+            if pad_len > 0:
+                padding = completion_ids.new_full((completion_ids.size(0), pad_len), fill_id)
+                completion_ids = torch.cat([completion_ids, padding], dim=1)
+            padded_completions.append(completion_ids)
+            padded_outputs.append(torch.cat([input_ids, completion_ids], dim=1))
+        all_outputs = torch.cat(padded_outputs, dim=0)
+        all_completion_ids = torch.cat(padded_completions, dim=0)
         gen_len = all_completion_ids.size(1)
 
         full_attention = _build_full_attention_mask(attention_mask, gen_len)
