@@ -1,0 +1,31 @@
+{
+  "before": {
+    "weight": "cot_sft_rd02",
+    "samples": 100,
+    "format_rate": 0.17,
+    "tag_score": 0.6375,
+    "answer_accuracy": 0.0,
+    "mean_reward": 0.11475000000000003,
+    "reward_distribution": {
+      "0.025": 21,
+      "0.4": 11,
+      "0.05": 17,
+      "0.07500000000000001": 42,
+      "0.375": 6,
+      "0.1": 3
+    }
+  },
+  "after": {
+    "weight": "grpo_g0_rd02",
+    "samples": 100,
+    "format_rate": 0.85,
+    "tag_score": 0.9175,
+    "answer_accuracy": 0.0,
+    "mean_reward": 0.3467499999999994,
+    "reward_distribution": {
+      "0.025": 9,
+      "0.4": 85,
+      "0.07500000000000001": 6
+    }
+  }
+}
