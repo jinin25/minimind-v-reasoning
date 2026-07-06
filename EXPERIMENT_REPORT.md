@@ -1,197 +1,164 @@
-# MiniMind-V-Reasoning Experiment Report
+# MiniMind-V-Reasoning 实验报告
 
-本文详细记录影响模型能力结论的主要实验与消融结果。
+## 1. 研究问题与评测原则
 
-## 1. 实验总览
+本项目研究约 109M 参数语言主干在冻结视觉编码器条件下的多模态能力边界。实验只保留能支持结论的主线：视觉对齐、SFT 数据规模、CoT/Reasoning Dropout、规则 GRPO reward hacking，以及为判断是否应继续 RL 所做的两组短答案诊断。
 
-| 编号 | 实验 | 核心变量 | 状态 |
-|---|---|---|---|
-| E1 | CoT数据蒸馏 | 四卡异步教师生成 | 已完成 |
-| E2 | CoT质量清洗 | 是否过滤模板化元推理 | 已完成 |
-| E3 | Multimodal Pretrain | 真实图像 vs 全零图像 vs 错配图像 | 已完成 |
-| E4 | General VLM-SFT | 30–60万分层数据 vs 分阶段全量数据 | 已完成 |
-| E5 | CoT-SFT | 无CoT vs CoT；Dropout 0 vs 0.2 | 已完成 |
-| E6 | Rule-based GRPO | SFT策略 vs GRPO策略 | 待实验 |
+评测遵循三条原则：
 
-## 2. E1：CoT数据蒸馏
+1. 同一消融使用相同初始化、固定验证集和生成设置；
+2. 同时报告真实图、全零图和错配图，区分语言先验与视觉 grounding；
+3. RL 不以平均奖励或格式率单独判定成功，必须同时改善 held-out 答案准确率并保留通用能力。
 
-### 目的
-
-从大规模图文SFT数据构造一句式结构化CoT，并将蒸馏控制在单机4卡约10小时内。
-
-### 方法
-
-- 教师：Qwen2.5-VL-7B-Instruct
-- 部署：4张A10各运行一个vLLM实例
-- 数据：确定性哈希抽样
-- 输出：教师生成`<think>`，`<answer>`沿用原始答案
-- 容错：每500条写Parquet分片和checkpoint
-- 约束：推理语言与原始问答语言一致
-
-### 结果
-
-| 指标 | 数值 |
-|---|---:|
-| 原始行数 | 2,904,511 |
-| 有效候选 | 2,202,245 |
-| 候选池 | 360,000 |
-| 请求尝试 | 301,551 |
-| 成功样本 | 300,023 |
-| Parse fail | 1,192 |
-| Language fail | 336 |
-| 成功率 | 99.49% |
-| 最终吞吐 | 10.15 samples/s |
-| 总耗时 | 8小时13分钟 |
-
-### 结论
-
-短输出、异步请求和四个独立vLLM实例适合单机多卡数据蒸馏；30万级样本可在一个工作日内完成。
-
-## 3. E2：CoT质量清洗消融
-
-### 目的
-
-比较“仅保证XML格式”和“进一步过滤模板化元推理”的数据质量差异。
-
-### 方法
-
-只检查`<think>`内容，过滤“the answer follows”“reference answer”“该答案”等不分析问题本身的元叙述，不修改答案与图片。
-
-### 结果
-
-| 数据版本 | 样本数 | 元推理残留 | 格式/空答案/损坏图片 |
-|---|---:|---:|---:|
-| 格式清洗后 | 300,023 | 113,929 | 0 |
-| 严格语义清洗后 | 186,094 | 0 | 0 |
-
-严格清洗保留率为62.03%，另有71条重复conversation待训练采样时去重。
-
-### 结论
-
-格式正确不代表推理有效。后续CoT-SFT使用186,094条严格清洗数据，并将未严格清洗版本仅作为数据质量消融对照。
-
-## 4. E3：Multimodal Pretrain
-
-### 目的
-
-在Reasoning LLM上建立视觉语言对齐，并通过图像置空消融验证模型确实使用视觉信息。
-
-### 设置
+## 2. 模型与公共环境
 
 | 项目 | 配置 |
 |---|---|
-| 初始化 | `reason_768.pth` |
-| 数据 | 1,273,674训练 / 1,024固定验证 |
-| 视觉编码器 | SigLIP P32/256，冻结 |
-| 可训练模块 | Vision Projector + LLM第0层 |
-| GPU | 4×A10 |
-| Batch | 8/卡，global batch 32 |
-| Sequence length | 360 |
-| Epoch | 1 |
-| Learning rate | 4e-4 |
+| LLM | MiniMind Reasoning，108,946,176 参数 |
+| 结构 | 16 layers，hidden 768，8 attention heads，2 KV heads，FFN 2048 |
+| 视觉编码器 | SigLIP P32/256，冻结，64 visual tokens |
+| Projector | 两层 MLP |
+| 输出协议 | `<think>...</think><answer>...</answer>` |
+| 硬件 | 4 × NVIDIA A10 24GB |
+| 并行 | PyTorch DDP |
 
-### 训练结果
+冻结的 SigLIP 约 93M 参数不计入“100M 小模型”的语言主干口径。
 
-![Multimodal Pretrain loss curve](./experiment_runs/p1_pretrain/loss_curve.png)
+## 3. 视觉语言对齐是否成立
 
-| 指标 | 结果 |
-|---|---:|
-| Steps | 39,803 / 39,803 |
-| Wall time | 1小时53分25秒 |
-| 日志点 | 797 |
-| 首个记录loss | 6.0462 |
-| 最后记录loss | 3.1847 |
-| 最后20点平均loss | 2.8587 |
-| 最低记录loss | 2.1931 |
-| 平均吞吐 | 189.45 samples/s |
-| 峰值显存 | 2.44 GB/卡 |
+### 3.1 参数
 
-曲线前期快速下降，约15k step后进入缓慢下降平台；后期batch波动存在，但移动平均没有反弹或发散。
-
-### 视觉消融
-
-在相同的256条固定验证样本上比较：
-
-| 条件 | 输入 |
+| 参数 | 数值 |
 |---|---|
-| Real Image | 原始图像 |
-| Zero Image | shape相同的全零图像 |
-| Shuffled Image | batch内循环错配的真实图像 |
+| 初始化 | `reason_768.pth` |
+| 数据 | 1,273,674 train / 1,024 fixed validation |
+| 可训练模块 | Projector + LLM 第 0 层 |
+| sequence length | 360 |
+| batch size | 8/GPU，global batch 32 |
+| epochs / steps | 1 / 39,803 |
+| learning rate | 4e-4 |
+| 训练耗时 | 1 h 53 min 25 s |
 
-| 条件 | Validation loss | 相对Real Image变化 |
+### 3.2 结果
+
+| 条件 | Validation loss | 相对真实图 |
 |---|---:|---:|
-| Real Image | 3.0470 | - |
-| Zero Image | 3.7419 | +0.6949（+22.81%） |
-| Shuffled Image | 3.6754 | +0.6284（+20.62%） |
+| Real image | 3.0470 | — |
+| Zero image | 3.7419 | +22.81% |
+| Shuffled image | 3.6754 | +20.62% |
 
-### 结论
+训练 loss 最后 20 个日志点均值为 2.8587，峰值显存 2.44 GB/GPU，平均吞吐 189.45 samples/s。错配图仍来自真实图像分布，因此它比单独置零更能说明模型使用了与文本匹配的图像语义。结论是：**视觉语言对齐成立，但这是 teacher-forced token loss 证据，不等价于自由生成准确率。**
 
-置空图和错配图均显著提高loss。错配图仍来自真实图像分布，因此结果不只是“全零像素异常”造成的惩罚，而表明模型利用了与文本匹配的视觉语义。该实验验证了Pretrain训练后，模型的视觉语言实现了对齐。
+## 4. 通用 VLM-SFT 的数据规模收益
 
+300K 与 600K 均从同一个 Pretrain checkpoint 初始化，配置和固定验证集一致；600K 集合包含 300K 集合。Full 是从 600K checkpoint 对剩余 2,303,511 条未见样本继续训练，因此只用于展示最终构建结果，不作为严格同初始化消融。
 
-## 5. E4：General VLM-SFT
-
-### 目的
-
-验证通用SFT数据规模从300K增加到600K是否继续改善泛化。两个正式组均从同一个Pretrain checkpoint初始化，使用相同训练配置与固定验证集；600K集合完整包含300K集合。
-
-![General VLM-SFT scale and staged full continuation](./experiment_runs/p2_sft_comparison.png)
-
-### 结果
-
-| 组别 | 数据量 | 末20点平均训练loss | 最终固定验证loss | 256样本Real-image loss |
+| 模型 | 训练数据 | 末 20 点训练 loss | 固定验证 loss | 256 样本 real-image loss |
 |---|---:|---:|---:|---:|
-| Pretrain | - | - | - | 4.9485 |
-| SFT-30K Smoke | 30,000 | 3.44 | - | 4.0518 |
-| SFT-300K | 300,000 | 3.2149 | 3.5408 | - |
+| Pretrain | 1,273,674 | — | — | 4.9485 |
+| SFT-300K | 300,000 | 3.2149 | 3.5408 | — |
 | SFT-600K | 600,000 | 3.0104 | 3.3331 | 3.3800 |
-| SFT-Full（600K续训） | +2,303,511未见样本 | 2.7593 | 3.0263 | 3.0692 |
+| SFT-Full | +2,303,511 | 2.7593 | 3.0263 | 3.0692 |
 
-600K相对300K将固定验证loss降低0.2077（5.87%）。在同一256条样本上，SFT-600K的Zero-image loss为3.6263，Shuffled-image loss为3.6196，均高于Real-image loss 3.3800，视觉依赖仍然保留。
+600K 相对 300K 的固定验证 loss 降低 5.87%；Full 相对 600K 再降低 9.20%。Full 的 zero/shuffled loss 为 3.3161/3.3081，仍高于 real loss 3.0692。约 100M 模型在该范围内尚未出现明显数据规模饱和，但 token loss 的持续改善仍需生成准确率验证。
 
-分阶段全量续训完成143,970步，耗时10小时57分，平均吞吐58.86 samples/s，峰值显存4.59 GB/卡。最终固定验证loss为3.0263，相对600K进一步降低0.3068（9.20%），相对300K降低0.5145（14.53%）。最终模型在同一256条样本上的Zero-image与Shuffled-image loss分别为3.3161和3.3081，较Real-image 3.0692增加0.2469和0.2388。
+## 5. CoT-SFT 与 Reasoning Dropout
 
-### 结论
+严格清洗后的 CoT 数据为 186,094 条；去重 71 条并留出固定验证集后，使用 185,023 条训练样本，加入 61,675 条 General replay（25%）。两组均从 SFT-Full 初始化。
 
-增加到600K不仅降低训练loss，也持续降低固定验证loss，没有出现明显过拟合。分阶段全量训练进一步改善固定验证loss，同时保留对匹配图像的依赖。由于Full从SFT-600K继续训练，它代表最终模型构建结果，不是与300K/600K严格同初始化的独立规模消融；对Full能力的最终判断还需要生成式任务准确率，不能只依据token loss。
+| 参数 | 数值 |
+|---|---|
+| train rows | 246,698 |
+| epochs | 2 |
+| max length | 1024 |
+| effective global batch | 64 |
+| learning rate | 2e-6 |
+| 唯一消融变量 | reasoning dropout = 0 / 0.2 |
 
-## 6. E5：CoT-SFT与Reasoning Dropout
-
-### 设置
-
-严格清洗后的186,094条CoT中发现71条重复；去重后留出1,000条固定CoT验证集，剩余185,023条用于训练。为缓解通用能力遗忘，确定性加入61,675条General SFT replay，最终训练集246,698条，replay比例25%。两组均从同一`SFT-Full`权重初始化，训练2 epochs，max length 1024，有效全局batch 64，学习率2e-6；唯一变量为Reasoning Dropout。
-
-| 组别 | Dropout | 末20点平均训练loss | 最优固定验证loss | 耗时 | 峰值显存 |
+| 模型 | 最优验证 loss | General token F1 | CoT off F1 | CoT on F1 | think 完整率 |
 |---|---:|---:|---:|---:|---:|
-| CoT-SFT RD=0 | 0 | 2.5871 | 2.5152 | 2小时44分 | 5.26 GB/卡 |
-| CoT-SFT RD=0.2 | 0.2 | 2.6260 | 2.5243 | 2小时44分 | 5.26 GB/卡 |
+| RD=0 | 2.5152 | 0.2420 | 0.2519 | 0.2280 | 76% |
+| RD=0.2 | 2.5243 | 0.2274 | 0.2625 | 0.2316 | 83% |
 
-### 固定生成评测
+RD=0 更好地保持通用生成，RD=0.2 则提高 reasoning-on 完整率和 reasoning-off CoT F1。两者没有单指标全面胜出。RD=0.2 被选作 GRPO 初始化，是因为它对有/无 think 两种模式更稳健，而不是因为其总体能力更强。
 
-General保持集包含VQA 100、OCR 100、计数27、短答案100；CoT集固定评测200条。General答案多为长自由文本，严格exact match接近零且不代表真实正确率，因此本阶段以token F1作相对比较，后续GRPO改用具有唯一短答案的可验证数据。
+## 6. 规则 GRPO 与 reward hacking
 
-| 模型 | General token F1 | CoT reasoning-off F1 | CoT reasoning-on F1 | reasoning-on think完整率 |
+### 6.1 G0 参数
+
+| 参数 | 数值 |
+|---|---|
+| 初始化 | `cot_sft_rd02_768.pth` |
+| train / validation | 1,000 / 200 |
+| epochs | 1 |
+| batch / accumulation | 1/GPU / 4 |
+| prompt / generation length | 512 / 192 |
+| generations per prompt | 4 |
+| learning rate | 1e-6 |
+| KL beta | 0.02 |
+| sampling | temperature 0.8，top-p 0.9，top-k 50 |
+| repetition penalty | 1.05 |
+| reward weights | format 0.3，tag 0.1，answer 0.6 |
+
+### 6.2 审计结果
+
+在固定 100 条样本上比较 GRPO 前后：
+
+| 模型 | 格式率 | tag score | 答案准确率 | 平均奖励 |
 |---|---:|---:|---:|---:|
-| CoT-SFT RD=0 | 0.2420 | 0.2519 | 0.2280 | 76% |
-| CoT-SFT RD=0.2 | 0.2274 | 0.2625 | 0.2316 | 83% |
+| CoT-SFT RD=0.2 | 17% | 0.6375 | 0% | 0.1148 |
+| GRPO G0 | 85% | 0.9175 | 0% | 0.3467 |
 
-reasoning-on评测必须将聊天模板末尾默认的空`<think></think>`改为开放的`<think>`再生成。早期评测未处理这一模板行为，导致think率被误报为0；表中使用修正后的口径。128-token生成上限下完整answer闭合率约10%，大量长回答在结束标签前被截断，因此该数字不作为模型格式能力的最终结论。
+奖励提高 202%，但完全来自格式与标签；答案能力没有任何提升。这是明确的 reward hacking，而非“效果较弱”。根因包括：格式分可在答案错误时独立获得、选择题/数字/OCR 的答案解析不够稳健，以及 base policy 正确样本过少导致组内优势缺乏真实能力信号。
 
-### 结论
+保留的修复包括：
 
-RD=0取得更低的训练/验证loss，并更好地保持General生成内容；RD=0.2在reasoning-on think完整率和reasoning-off CoT F1上更优，符合随机丢弃对双模式鲁棒性的预期。两组不存在单指标全面胜出：RD=0保留为通用基线，RD=0.2作为规则奖励GRPO的初始化分支，用短答案奖励进一步约束格式与决策。
+- 选择题、千分位数字、Unicode OCR 的类型化解析和回归测试；
+- bbox 等不可靠规则默认不给答案分；
+- `correct_only_format_bonus`：只有答案正确时才附加格式奖励；
+- 多 token `</answer>` 停止序列，避免闭合后继续生成；
+- 变长 rollout padding 修复和按任务评测。
 
-## 7. E6：Rule-based GRPO
+修复奖励只能堵住漏洞，不能凭空制造正确 rollout，因此下一步先测试 SFT 能否把策略带到可学习区间。
 
-G0从RD=0.2初始化，使用1,000条RL_Innovator-VL可验证样本，确认reward方差、KL、格式率和答案准确率变化后，再决定是否扩展到5,000及10,000–20,000条。最终比较同一checkpoint在GRPO前后的准确率，而不是只比较格式奖励。
+## 7. RL 准入诊断
 
-## 8. 最终结果表
+### 7.1 高权重短答案 warmup：能力提升伴随遗忘
 
-| 模型阶段 | 普通VQA | OCR | 计数 | 推理准确率 | 置空下降 | 格式合规率 |
-|---|---:|---:|---:|---:|---:|---:|
-| Reason LLM | 待测 | 待测 | 待测 | 待测 | - | 待测 |
-| + Pretrain | SFT后评测 | SFT后评测 | SFT后评测 | - | loss +20.62% | - |
-| + General SFT | 待生成评测 | 待生成评测 | 待生成评测 | 待生成评测 | loss +7.78% | 待生成评测 |
-| + CoT-SFT | F1 0.2386 | F1 0.2486 | F1 0.1978 | CoT F1 0.2280 | 待复测 | think 76% |
-| + Reasoning Dropout | F1 0.2040 | F1 0.2393 | F1 0.1854 | CoT F1 0.2316 | 待复测 | think 83% |
-| + GRPO | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
+训练集为 5,000 条（2,000 multiple-choice、1,500 counting、1,500 OCR），从 RD=0.2 初始化。参数为 3 epochs、batch 5/GPU、gradient accumulation 3、max length 768、learning rate 3e-6、answer/XML/EOS token loss weight 4，全部 LLM 与 Projector 可训练。
+
+| Epoch | MC accuracy | Counting | OCR | Macro | pass@4 | General F1 retention |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 27% | 0% | 0.5% | 9.17% | 23.33% | 50.57% |
+| 2 | 29% | 4% | 0% | 11.00% | 29.33% | 45.79% |
+| 3 | 29% | 3.5% | 0% | 10.83% | 27.67% | 46.91% |
+
+模型学会了部分选择题格式与决策，但计数/OCR 几乎没有形成能力，并发生严重灾难性遗忘。此 checkpoint 未获 GRPO 准入。
+
+### 7.2 保守 warmup：保住通用能力但视觉成功率仍不足
+
+为减少遗忘，使用 23,334 条 materialized short-answer + 10,000 条 General replay（70/30），只训练顶部 4 层与 Projector；2 epochs，batch 5/GPU，accumulation 3，max length 768，learning rate 1e-6，answer loss weight 2，Reasoning Dropout 0.2。诊断集包含 200 条 MC、200 条 counting、200 条 OCR，且与训练 ID 不重叠。
+
+| 模型 | Normal macro | Zero macro | Shuffle macro | General F1 | General retention |
+|---|---:|---:|---:|---:|---:|
+| RD=0.2 baseline | 2.00% | 2.00% | 1.00% | 0.2274 | 100% |
+| Epoch 1 | 3.33% | 4.33% | 2.33% | 0.2185 | 96.10% |
+| Epoch 2 | 2.50% | 8.67% | 3.00% | 0.2192 | 96.42% |
+
+通用能力得以保留，但正常图像并未稳定优于 zero/shuffle；Epoch 2 甚至在 zero 条件下更高。这说明模型主要在利用答案先验和格式，而不是可靠读取图像。两轮均未通过 RFT/GRPO 准入门槛。
+
+## 8. 面向 100M 小模型的结论
+
+1. 约 109M 模型可以通过冻结视觉塔 + 小型 Projector 建立可测的视觉语言对齐，且扩大 SFT 数据仍能降低验证 loss。
+2. 从“token 级利用图像”到“生成时基于图像做出正确短答案”存在明显鸿沟；模型容量、视觉 token 压缩和训练目标都可能成为瓶颈。
+3. 结构化 CoT 对输出行为的影响大于对答案正确率的影响。对小模型而言，长推理还会消耗有限生成预算，并放大模板依赖。
+4. 规则 GRPO 的前提不是奖励函数能运行，而是 base policy 已经产生足够多、可由规则可靠识别的正确样本。当前模型未满足这一条件。
+5. 最合理的停止点是保留 GRPO 实现和失败分析，不继续扩大 RL。后续若重启，应优先提高视觉短答案 SFT 的真实/错配图差距，再设置“正确率、视觉增益、通用保持率”三重准入门槛。
+
+## 9. 结果图
+
+下图把 RL 探索中最关键的三件事放在一起：G0 只提升格式；激进 warmup 以通用能力遗忘换取有限短答案准确率；保守 warmup 保住通用能力，却没有建立稳定视觉增益。
+
+![RL exploration findings](./experiment_runs/rl_exploration_findings.png)
+
+因此，本项目的负结果是可解释且可复现的：**100M 级策略尚未跨过视觉决策的 RL 准入门槛，继续优化格式奖励没有意义。**

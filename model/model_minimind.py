@@ -251,7 +251,7 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
 
     # https://github.com/jingyaogong/minimind/discussions/611
     @torch.inference_mode()
-    def generate(self, inputs=None, attention_mask=None, max_new_tokens=8192, temperature=0.85, top_p=0.85, top_k=50, eos_token_id=2, streamer=None, use_cache=True, num_return_sequences=1, do_sample=True, repetition_penalty=1.0, **kwargs):
+    def generate(self, inputs=None, attention_mask=None, max_new_tokens=8192, temperature=0.85, top_p=0.85, top_k=50, eos_token_id=2, streamer=None, use_cache=True, num_return_sequences=1, do_sample=True, repetition_penalty=1.0, stop_token_sequences=None, **kwargs):
         input_ids = kwargs.pop("input_ids", inputs).repeat(num_return_sequences, 1)
         attention_mask = attention_mask.repeat(num_return_sequences, 1) if attention_mask is not None else None
         past_key_values = kwargs.pop("past_key_values", None)
@@ -278,7 +278,13 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
             if streamer: streamer.put(next_token.cpu())
             if eos_token_id is not None:
                 finished |= next_token.squeeze(-1).eq(eos_token_id)
-                if finished.all(): break
+            if stop_token_sequences:
+                for sequence in stop_token_sequences:
+                    if sequence and input_ids.shape[1] >= len(sequence):
+                        suffix = input_ids[:, -len(sequence):]
+                        target = suffix.new_tensor(sequence).unsqueeze(0)
+                        finished |= suffix.eq(target).all(dim=1)
+            if finished.all(): break
         if streamer: streamer.end()
         if kwargs.get("return_kv"): return {'generated_ids': input_ids, 'past_kv': past_key_values}
         return input_ids

@@ -132,6 +132,13 @@ def init_vlm_model(vlm_config, from_weight='pretrain_vlm', tokenizer_path=None,
                 param.requires_grad = True
     elif freeze_llm == 2:
         pass
+    elif freeze_llm == 3:
+        # Preserve the lower language layers and update only the top four plus
+        # the vision-language projector.
+        top_start = max(0, len(model.model.layers) - 4)
+        for name, param in model.model.named_parameters():
+            if any(f'layers.{idx}.' in name for idx in range(top_start, len(model.model.layers))):
+                param.requires_grad = True
 
     get_model_params(model, vlm_config)
     Logger(f'Trainable Params: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f}M')
@@ -255,4 +262,3 @@ class SkipBatchSampler(Sampler):
     def __len__(self):
         total_batches = (len(self.sampler) + self.batch_size - 1) // self.batch_size
         return max(0, total_batches - self.skip_batches)
-

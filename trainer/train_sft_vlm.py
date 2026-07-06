@@ -7,6 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import argparse
 import time
 import warnings
+import shutil
 import torch
 import torch.distributed as dist
 from contextlib import nullcontext
@@ -22,19 +23,28 @@ from trainer.trainer_utils import PROJECT_DIR, get_lr, Logger, is_main_process, 
 warnings.filterwarnings('ignore')
 
 
+def sft_collate_fn(batch):
+    base = vlm_collate_fn([item[:3] for item in batch])
+    if len(batch[0]) == 4:
+        return (*base, torch.stack([item[3] for item in batch]))
+    return (*base, None)
+
+
 @torch.no_grad()
 def evaluate_validation(loader):
     model.eval()
     loss_sum = 0.0
     sample_count = 0
-    for batch_index, (input_ids, labels, pixel_values) in enumerate(loader):
+    for batch_index, (input_ids, labels, pixel_values, loss_weights) in enumerate(loader):
         if args.eval_batches > 0 and batch_index >= args.eval_batches:
             break
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
+        loss_weights = loss_weights.to(args.device) if loss_weights is not None else None
         pixel_values = {k: v.to(args.device) for k, v in pixel_values.items()} if isinstance(pixel_values, dict) else pixel_values.to(args.device)
         with autocast_ctx:
-            result = model(input_ids, labels=labels, pixel_values=pixel_values)
+            result = model(input_ids, labels=labels, pixel_values=pixel_values,
+                           loss_weights=loss_weights)
             batch_loss = result.loss + result.aux_loss
         batch_size = input_ids.size(0)
         loss_sum += float(batch_loss) * batch_size
@@ -54,11 +64,12 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None, val_loader=None)
     interval_batches = 0
     grad_norm = 0.0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    for local_step, (input_ids, labels, pixel_values) in enumerate(loader):
+    for local_step, (input_ids, labels, pixel_values, loss_weights) in enumerate(loader):
         step = start_step + local_step
         completed_step = step + 1
         input_ids = input_ids.to(args.device)
         labels = labels.to(args.device)
+        loss_weights = loss_weights.to(args.device) if loss_weights is not None else None
         pixel_values = {k: v.to(args.device) for k, v in pixel_values.items()} if isinstance(pixel_values, dict) else pixel_values.to(args.device)
         lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
         for param_group in optimizer.param_groups:
@@ -68,7 +79,8 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None, val_loader=None)
         sync_ctx = model.no_sync() if isinstance(model, DistributedDataParallel) and not update_now else nullcontext()
         with sync_ctx:
             with autocast_ctx:
-                res = model(input_ids, labels=labels, pixel_values=pixel_values)
+                res = model(input_ids, labels=labels, pixel_values=pixel_values,
+                            loss_weights=loss_weights)
                 batch_loss = res.loss + res.aux_loss
                 loss = batch_loss / args.accumulation_steps
             scaler.scale(loss).backward()
@@ -100,7 +112,7 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None, val_loader=None)
             memory_gb = torch.cuda.max_memory_allocated(args.device) / 1024 ** 3 if torch.cuda.is_available() else 0.0
             eta_min = spend_time / completed_step * max(iters - completed_step, 0) / 60
             Logger(f'Epoch:[{epoch + 1}/{args.epochs}]({completed_step}/{iters}), loss: {current_loss:.4f}, logits_loss: {current_logits_loss:.4f}, aux_loss: {current_aux_loss:.4f}, lr: {current_lr:.8f}, grad_norm: {grad_norm:.3f}, throughput: {samples_per_second:.2f} samples/s, peak_memory: {memory_gb:.2f} GB, eta: {eta_min:.1f}min')
-            if wandb: wandb.log({"loss": current_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "grad_norm": grad_norm, "throughput_samples_per_second": samples_per_second, "peak_gpu_memory_gb": memory_gb, "global_step": completed_step})
+            if wandb: wandb.log({"loss": current_loss, "weighted_loss": current_logits_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "grad_norm": grad_norm, "throughput_samples_per_second": samples_per_second, "peak_gpu_memory_gb": memory_gb, "global_step": completed_step})
             interval_time = time.time()
             interval_samples = 0
             interval_loss_sum = 0.0
@@ -160,9 +172,11 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str, default=os.path.join(PROJECT_DIR, "dataset", "sft_i2t.parquet"), help="训练数据路径")
     parser.add_argument('--from_weight', default='pretrain_vlm', type=str, help="基于哪个权重训练，为none则不基于任何权重训练")
     parser.add_argument('--from_resume', default=0, type=int, choices=[0, 1], help="是否自动检测&续训（0=否，1=是）")
-    parser.add_argument('--freeze_llm', default=0, type=int, choices=[0, 1, 2], help="冻结策略（0=完全可训练，1=冻结+解冻第0层，2=完全冻结仅训练proj）")
+    parser.add_argument('--freeze_llm', default=0, type=int, choices=[0, 1, 2, 3], help="冻结策略（0=完全可训练，1=仅第0层，2=仅proj，3=顶部4层+proj）")
     parser.add_argument('--reasoning_drop_ratio', default=0.0, type=float, help="删除完整think块的概率；普通SFT设0，CoT-SFT建议0.2")
     parser.add_argument('--cot_trim_ratio', default=0.0, type=float, help="将推理截到第一句的概率，默认关闭")
+    parser.add_argument('--answer_loss_weight', default=1.0, type=float,
+                        help="XML标签、answer块和EOS的loss权重")
     parser.add_argument("--use_compile", default=0, type=int, choices=[0, 1], help="是否使用torch.compile加速（0=否，1=是）")
     parser.add_argument("--use_swanlab", action="store_true", help="使用SwanLab记录实验")
     parser.add_argument("--swanlab_project", type=str, default="MiniMind-V-Reasoning", help="SwanLab项目名")
@@ -197,6 +211,7 @@ if __name__ == "__main__":
         max_length=vlm_config.max_seq_len,
         reasoning_drop_ratio=args.reasoning_drop_ratio,
         cot_trim_ratio=args.cot_trim_ratio,
+        answer_loss_weight=args.answer_loss_weight,
     )
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
     val_loader = None
@@ -212,7 +227,7 @@ if __name__ == "__main__":
         )
         val_sampler = DistributedSampler(val_ds, shuffle=False) if dist.is_initialized() else None
         val_loader = DataLoader(val_ds, batch_size=args.batch_size, sampler=val_sampler, shuffle=False,
-                                num_workers=0, pin_memory=True, collate_fn=vlm_collate_fn)
+                                num_workers=0, pin_memory=True, collate_fn=sft_collate_fn)
     scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == 'float16'))
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
 
@@ -250,12 +265,22 @@ if __name__ == "__main__":
         setup_seed(42 + epoch); indices = torch.randperm(len(train_ds)).tolist()
         skip = start_step if (epoch == start_epoch and start_step > 0) else 0
         batch_sampler = SkipBatchSampler(train_sampler or indices, args.batch_size, skip)
-        loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True, collate_fn=vlm_collate_fn)
+        loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True, collate_fn=sft_collate_fn)
         if skip > 0:
             Logger(f'Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step，从step {start_step + 1}开始')
             stopped = train_epoch(epoch, loader, len(loader) + skip, start_step, wandb, val_loader)
         else:
             stopped = train_epoch(epoch, loader, len(loader), 0, wandb, val_loader)
+        if is_main_process() and not stopped:
+            suffix = '_moe' if vlm_config.use_moe else ''
+            src = os.path.join(args.save_dir, f'{args.save_weight}_{vlm_config.hidden_size}{suffix}.pth')
+            dst = os.path.join(args.save_dir, f'{args.save_weight}_epoch{epoch + 1}_{vlm_config.hidden_size}{suffix}.pth')
+            shutil.copy2(src, dst)
+            resume_src = os.path.join(args.checkpoint_dir, f'{args.save_weight}_{vlm_config.hidden_size}{suffix}_resume.pth')
+            resume_dst = os.path.join(args.checkpoint_dir, f'{args.save_weight}_epoch{epoch + 1}_{vlm_config.hidden_size}{suffix}_resume.pth')
+            shutil.copy2(resume_src, resume_dst)
+            Logger(f'Saved epoch snapshot: {dst}')
+        if dist.is_initialized(): dist.barrier()
         if stopped:
             break
 

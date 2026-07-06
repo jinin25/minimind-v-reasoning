@@ -153,6 +153,7 @@ class MiniMindVLM(MiniMindForCausalLM):
                 use_cache: bool = False,
                 logits_to_keep: Union[int, torch.Tensor] = 0,
                 labels: Optional[torch.Tensor] = None,
+                loss_weights: Optional[torch.Tensor] = None,
                 pixel_values: Optional[torch.FloatTensor] = None,
                 **args):
         batch_size, seq_length = input_ids.shape
@@ -254,11 +255,19 @@ class MiniMindVLM(MiniMindForCausalLM):
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             if (shift_labels != -100).any():
-                loss = F.cross_entropy(
+                token_loss = F.cross_entropy(
                     shift_logits.view(-1, shift_logits.size(-1)),
                     shift_labels.view(-1),
-                    ignore_index=-100
+                    ignore_index=-100,
+                    reduction='none'
                 )
+                valid = shift_labels.view(-1).ne(-100)
+                if loss_weights is not None:
+                    weights = loss_weights[..., 1:].contiguous().view(-1).to(token_loss.dtype)
+                    weights = weights * valid.to(weights.dtype)
+                    loss = (token_loss * weights).sum() / weights.sum().clamp_min(1.0)
+                else:
+                    loss = token_loss[valid].mean()
             else:
                 loss = shift_logits.new_zeros(())
 

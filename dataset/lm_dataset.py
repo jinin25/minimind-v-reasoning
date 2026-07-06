@@ -82,7 +82,7 @@ class VLMDataset(Dataset):
     def __init__(self, parquet_path, tokenizer, preprocess=None, max_length=512,
                  image_special_token='<|image_pad|>', image_token_len=64,
                  reasoning_drop_ratio=0.0, cot_trim_ratio=0.0,
-                 enable_augmentation=True):
+                 enable_augmentation=True, answer_loss_weight=1.0):
         super().__init__()
         self.table = pa.Table.from_batches(pq.ParquetFile(parquet_path).iter_batches())
         self.tokenizer = tokenizer
@@ -92,8 +92,61 @@ class VLMDataset(Dataset):
         self.reasoning_drop_ratio = float(reasoning_drop_ratio)
         self.cot_trim_ratio = float(cot_trim_ratio)
         self.enable_augmentation = bool(enable_augmentation)
+        self.answer_loss_weight = float(answer_loss_weight)
         self.bos_id = tokenizer(f'{tokenizer.bos_token}assistant\n', add_special_tokens=False).input_ids
         self.eos_id = tokenizer(f'{tokenizer.eos_token}\n', add_special_tokens=False).input_ids
+        self.xml_token_ids = {
+            tag: tokenizer(tag, add_special_tokens=False).input_ids
+            for tag in ('<think>', '</think>', '<answer>', '</answer>')
+        }
+
+    @staticmethod
+    def _find_sequence(values, pattern, start=0):
+        if not pattern:
+            return -1
+        for i in range(start, len(values) - len(pattern) + 1):
+            if values[i:i + len(pattern)] == pattern:
+                return i
+        return -1
+
+    def generate_loss_weights(self, input_ids, labels):
+        weights = [1.0] * len(input_ids)
+        factor = self.answer_loss_weight
+        if factor <= 1.0:
+            return weights
+
+        # XML tags are always emphasized.
+        for pattern in self.xml_token_ids.values():
+            pos = 0
+            while True:
+                pos = self._find_sequence(input_ids, pattern, pos)
+                if pos < 0:
+                    break
+                for j in range(pos, min(pos + len(pattern), len(weights))):
+                    if labels[j] != -100:
+                        weights[j] = factor
+                pos += len(pattern)
+
+        # The complete answer block and the assistant EOS receive the same weight.
+        open_ids = self.xml_token_ids['<answer>']
+        close_ids = self.xml_token_ids['</answer>']
+        begin = self._find_sequence(input_ids, open_ids)
+        end = self._find_sequence(input_ids, close_ids, max(begin, 0))
+        if begin >= 0 and end >= 0:
+            end += len(close_ids)
+            for j in range(begin, min(end, len(weights))):
+                if labels[j] != -100:
+                    weights[j] = factor
+        pos = 0
+        while True:
+            pos = self._find_sequence(input_ids, self.eos_id, pos)
+            if pos < 0:
+                break
+            for j in range(pos, min(pos + len(self.eos_id), len(weights))):
+                if labels[j] != -100:
+                    weights[j] = factor
+            pos += len(self.eos_id)
+        return weights
 
     def __len__(self):
         return len(self.table)
@@ -146,6 +199,7 @@ class VLMDataset(Dataset):
         input_ids = self.tokenizer(prompt).input_ids[:self.max_length]
         input_ids += [self.tokenizer.pad_token_id] * (self.max_length - len(input_ids))
         labels = self.generate_labels(input_ids)
+        loss_weights = self.generate_loss_weights(input_ids, labels)
 
         image_inputs_list = [MiniMindVLM.image2tensor(Image.open(io.BytesIO(img)), self.preprocess) for img in image_bytes]
         if hasattr(image_inputs_list[0], 'keys'):
@@ -158,7 +212,11 @@ class VLMDataset(Dataset):
         #     print(f"{i:3d}: X={self.tokenizer.decode([x])!r:16s} ---> Y={self.tokenizer.decode([input_ids[i+1]])!r:16s} label={y}")
         # # ================
 
-        return torch.tensor(input_ids, dtype=torch.long), torch.tensor(labels, dtype=torch.long), image_data
+        result = (torch.tensor(input_ids, dtype=torch.long),
+                  torch.tensor(labels, dtype=torch.long), image_data)
+        if self.answer_loss_weight > 1.0:
+            result += (torch.tensor(loss_weights, dtype=torch.float32),)
+        return result
 
 # 测试parquet数据读取和可视化
 if __name__ == '__main__':

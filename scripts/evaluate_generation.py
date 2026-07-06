@@ -34,6 +34,7 @@ p.add_argument("--max_new_tokens", type=int, default=128); p.add_argument("--rea
 p.add_argument("--device", default="cuda:0"); args = p.parse_args()
 cfg = build_vlm_config("reason_vlm_109m", 1024, 0)
 model, tok, processor = init_vlm_model(cfg, from_weight=args.weight, device=args.device, freeze_llm=2); model.eval()
+answer_stop = tok('</answer>', add_special_tokens=False).input_ids
 t = pq.read_table(args.data); n = len(t) if args.samples < 0 else min(args.samples, len(t)); records=[]
 for i in range(n):
     messages = json.loads(t["conversations"][i].as_py()); user = next(x["content"] for x in messages if x["role"] == "user")
@@ -54,7 +55,8 @@ for i in range(n):
     pixels = {k:v.to(args.device) for k,v in MiniMindVLM.image2tensor(Image.open(io.BytesIO(raw)), processor).items()}
     with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
         out = model.generate(inputs.input_ids, attention_mask=inputs.attention_mask, pixel_values=pixels,
-                             do_sample=False, max_new_tokens=args.max_new_tokens, pad_token_id=tok.pad_token_id, eos_token_id=tok.eos_token_id)
+                             do_sample=False, max_new_tokens=args.max_new_tokens, pad_token_id=tok.pad_token_id,
+                             eos_token_id=tok.eos_token_id, stop_token_sequences=[answer_stop])
     pred = reasoning_prefix + tok.decode(out[0, inputs.input_ids.shape[1]:], skip_special_tokens=True)
     ref = t["reference"][i].as_py() if "reference" in t.column_names else next(x["content"] for x in messages if x["role"] == "assistant")
     kind = t["category"][i].as_py() if "category" in t.column_names else "cot_reasoning"

@@ -12,6 +12,7 @@ import io
 import math
 import re
 import warnings
+import unicodedata
 from bisect import bisect_right
 from contextlib import nullcontext
 
@@ -293,12 +294,14 @@ class LocalRewarder:
         answer_weight=0.4,
         use_judge_reward=False,
         judge_weight=0.2,
+        correct_only_format_bonus=False,
     ):
         self.format_weight = float(format_weight)
         self.tag_weight = float(tag_weight)
         self.answer_weight = float(answer_weight)
         self.use_judge_reward = bool(use_judge_reward)
         self.judge_weight = float(judge_weight)
+        self.correct_only_format_bonus = bool(correct_only_format_bonus)
         self._judge_fn = None
         self._judge_warning_shown = False
 
@@ -347,14 +350,33 @@ class LocalRewarder:
         if not predicted or not answer_str:
             return 0.0
         t = str(answer_type).strip().lower()
+        if "multiple-choice" in t or "multiple_choice" in t or t in {"choice", "mcq"}:
+            def extract_choice(text):
+                text = unicodedata.normalize("NFKC", str(text)).upper()
+                explicit = re.findall(r"(?:ANSWER|OPTION|CHOICE|选项|答案)\s*(?:IS\s*)?[:：]?\s*[\(\[]?([A-Z])(?:[\)\]]|\b)", text)
+                if explicit:
+                    return explicit[-1]
+                standalone = re.findall(r"(?<![A-Z0-9])([A-Z])(?![A-Z0-9])", text)
+                return standalone[-1] if standalone else ""
+            return float(bool(extract_choice(predicted)) and extract_choice(predicted) == extract_choice(answer_str))
         if "number" in t:
-            pred_nums = re.findall(r"-?\d+(?:\.\d+)?", predicted)
-            ref_nums = re.findall(r"-?\d+(?:\.\d+)?", answer_str)
+            number_pattern = r"[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+            pred_nums = re.findall(number_pattern, unicodedata.normalize("NFKC", predicted))
+            ref_nums = re.findall(number_pattern, unicodedata.normalize("NFKC", answer_str))
             if not pred_nums or not ref_nums:
                 return 0.0
-            pred_value, ref_value = float(pred_nums[-1]), float(ref_nums[-1])
+            pred_value, ref_value = float(pred_nums[-1].replace(",", "")), float(ref_nums[-1].replace(",", ""))
             tolerance = max(1e-6, abs(ref_value) * 1e-4)
             return float(abs(pred_value - ref_value) <= tolerance)
+
+        if "ocr" in t:
+            def normalize_ocr(text):
+                text = unicodedata.normalize("NFKC", str(text)).casefold()
+                return "".join(ch for ch in text if not unicodedata.category(ch).startswith(("P", "Z")) and not ch.isspace())
+            return float(bool(normalize_ocr(predicted)) and normalize_ocr(predicted) == normalize_ocr(answer_str))
+
+        if "bbox" in t or "ground" in t:
+            return 0.0
 
         normalize = lambda x: re.sub(r"\s+", " ", x).strip().lower()
         return float(normalize(predicted) == normalize(answer_str))
@@ -386,11 +408,13 @@ class LocalRewarder:
         tag_score = self._tag_count_reward(completion)
         answer_score = self._answer_reward(completion, answer, answer_type)
 
-        reward = (
-            self.format_weight * format_score
-            + self.tag_weight * tag_score
-            + self.answer_weight * answer_score
-        )
+        if self.correct_only_format_bonus:
+            reward = self.answer_weight * answer_score
+            if answer_score > 0:
+                reward += self.format_weight * format_score
+        else:
+            reward = (self.format_weight * format_score + self.tag_weight * tag_score
+                      + self.answer_weight * answer_score)
         if self.use_judge_reward:
             reward += self.judge_weight * self._judge_reward(
                 completion,
@@ -754,6 +778,7 @@ def main():
     parser.add_argument("--format_weight", type=float, default=0.4)
     parser.add_argument("--tag_weight", type=float, default=0.2)
     parser.add_argument("--answer_weight", type=float, default=0.4)
+    parser.add_argument("--correct_only_format_bonus", action="store_true")
     parser.add_argument("--use_judge_reward", action="store_true", help="Optional judge reward, default off")
     parser.add_argument("--judge_weight", type=float, default=0.2)
 
@@ -764,6 +789,7 @@ def main():
     parser.add_argument("--init_ckpt", type=str, default="../checkpoints/cot_vlm_768.pth", help="Initial SFT/VLM checkpoint")
     parser.add_argument("--from_resume", type=int, default=0, choices=[0, 1], help="Resume from --save_weight checkpoint")
     parser.add_argument("--use_compile", type=int, default=0, choices=[0, 1])
+    parser.add_argument("--freeze_llm", type=int, default=0, choices=[0, 1, 2, 3])
     parser.add_argument("--use_swanlab", action="store_true")
     parser.add_argument("--swanlab_project", type=str, default="MiniMind-V-Reasoning")
 
@@ -820,7 +846,7 @@ def main():
         vlm_config,
         from_weight="none",
         device=args.device,
-        freeze_llm=0,
+        freeze_llm=args.freeze_llm,
     )
 
     if ckp_data is None and args.init_ckpt and os.path.exists(args.init_ckpt):
@@ -905,6 +931,7 @@ def main():
         answer_weight=args.answer_weight,
         use_judge_reward=args.use_judge_reward,
         judge_weight=args.judge_weight,
+        correct_only_format_bonus=args.correct_only_format_bonus,
     )
 
     Logger(f"Train samples: {len(train_ds)}, Val samples: {len(val_ds)}, Iters/epoch: {iters}")

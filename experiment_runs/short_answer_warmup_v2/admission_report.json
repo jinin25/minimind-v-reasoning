@@ -1,0 +1,50 @@
+{
+  "baseline_general_f1": 0.2273721514303659,
+  "epochs": [
+    {
+      "epoch": 1,
+      "multiple_choice": 0.27,
+      "counting": 0.0,
+      "ocr": 0.005,
+      "macro": 0.09166666666666667,
+      "pass_at_4": 0.2333333333333333,
+      "general_f1": 0.11498602088016362,
+      "general_retention": 0.505717257618415,
+      "max_repeat_rate": 0.0,
+      "weight": "out/short_answer_warmup_v2_epoch1_768.pth",
+      "sha256": "62fb30309931a6371d2905d8ba5c3daee79b92ee53870d42c7aeb23407e0c15b",
+      "gate_passed": false
+    },
+    {
+      "epoch": 2,
+      "multiple_choice": 0.29,
+      "counting": 0.04,
+      "ocr": 0.0,
+      "macro": 0.10999999999999999,
+      "pass_at_4": 0.2933333333333334,
+      "general_f1": 0.10411281858475405,
+      "general_retention": 0.4578960876685869,
+      "max_repeat_rate": 0.0,
+      "weight": "out/short_answer_warmup_v2_epoch2_768.pth",
+      "sha256": "a40916d958d7e2d046585a363f56b8b4b106b6a911056bf165836fba3c0509e9",
+      "gate_passed": false
+    },
+    {
+      "epoch": 3,
+      "multiple_choice": 0.29,
+      "counting": 0.035,
+      "ocr": 0.0,
+      "macro": 0.10833333333333332,
+      "pass_at_4": 0.27666666666666667,
+      "general_f1": 0.10665409419296902,
+      "general_retention": 0.4690728109050438,
+      "max_repeat_rate": 0.0,
+      "weight": "out/short_answer_warmup_v2_epoch3_768.pth",
+      "sha256": "d54a216903cb2927eecc059517dc0273a1ca1f6b72650ea420c0a1916c10d5d4",
+      "gate_passed": false
+    }
+  ],
+  "grpo_admitted": false,
+  "recommended_checkpoint": null,
+  "next_action": "stop GRPO and inspect task/data failures"
+}

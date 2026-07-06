@@ -1,193 +1,73 @@
 # MiniMind-V-Reasoning
 
-MiniMind-V-Reasoning 是一个约 109M 参数的轻量多模态推理模型实验项目。项目以 MiniMind Reasoning LLM 为语言基座，连接冻结的 SigLIP 视觉编码器，通过多模态预训练、视觉指令微调、结构化 CoT 蒸馏和规则奖励 GRPO，研究小模型在有限算力下获得读图、简短推理和可验证决策能力的可行路径。
+MiniMind-V-Reasoning 是一个面向约 100M 参数量级多模态模型的探索项目。模型以 MiniMind Reasoning LLM 为语言主干，连接冻结的 SigLIP 视觉编码器，依次进行视觉语言对齐、通用 VLM-SFT、结构化 CoT-SFT，并尝试无需奖励模型的规则 GRPO。
 
-## 项目目标
+项目的重点不是追求大模型级绝对指标，而是回答一个更实际的问题：**约 109M 的语言模型在有限算力下能学会多少读图、短答案决策和结构化推理能力，瓶颈又在哪里？**
 
-项目围绕三个问题展开：
-
-1. Reasoning LLM 能否通过重新进行视觉语言对齐，稳定获得读图能力？
-2. 一句式结构化 CoT 与 Reasoning Dropout 能否增强推理，同时降低固定模板依赖？
-3. 不训练额外奖励模型，仅使用答案一致性规则，GRPO 能否进一步提升可验证视觉任务表现？
-
-## 模型架构
+## 模型与训练路径
 
 ```mermaid
 flowchart LR
-    I["Image"] --> V["SigLIP P32/256<br/>Frozen Vision Encoder"]
-    V --> P["Vision Projector<br/>64 visual tokens"]
-    P --> L["MiniMind Reasoning LLM<br/>109M / 16 layers"]
-    T["Text Prompt"] --> L
-    L --> O["think + answer"]
+    A["MiniMind Reasoning LLM<br/>约 109M / 16 layers"] --> B["视觉语言预训练"]
+    I["SigLIP P32/256<br/>冻结"] --> B
+    B --> C["General VLM-SFT"]
+    C --> D["CoT-SFT<br/>Reasoning Dropout"]
+    D --> E["Rule-based GRPO"]
+    E --> F["Reward hacking 审计"]
 ```
-
-### 核心配置
 
 | 模块 | 配置 |
 |---|---|
-| Language Backbone | MiniMind Reasoning |
-| LLM参数量 | 108,946,176 |
-| Hidden size | 768 |
-| Transformer layers | 16 |
+| Language backbone | MiniMind Reasoning，hidden size 768，16 layers |
+| LLM 参数量 | 108,946,176 |
 | Attention / KV heads | 8 / 2 |
 | FFN intermediate | 2048 |
-| Vocabulary | 6400 |
-| Vision Encoder | SigLIP，image 256，patch 32，冻结 |
+| Vision encoder | SigLIP P32/256，约 93M，始终冻结 |
 | Vision tokens | 64 |
-| Vision Projector | 2层MLP，可训练 |
-| 推理格式 | `<think>...</think><answer>...</answer>` |
+| Vision-language projector | 2 层 MLP，可训练 |
+| 输出格式 | `<think>...</think><answer>...</answer>` |
 
-Vision Encoder 约 93M 参数但始终冻结；项目训练和保存的主体是约 109M LLM 与 Vision Projector。
+项目所说的“约 100M 小模型”主要指可训练和保存的语言主干；冻结视觉编码器不计入这一口径。
 
-## 训练流程
+## 主要结果
 
-```mermaid
-flowchart LR
-    A["reason_768.pth"] --> B["Multimodal Pretrain"]
-    B --> C["General VLM-SFT"]
-    C --> D["CoT-SFT"]
-    D --> E["Reasoning Dropout"]
-    E --> F["Rule-based GRPO"]
-```
+- 视觉预训练有效：真实图像验证 loss 为 3.0470，图像错配后升至 3.6754，说明模型确实利用了匹配的视觉语义。
+- 扩大通用 SFT 数据仍有收益：固定验证 loss 从 300K 的 3.5408 降到 600K 的 3.3331，分阶段全量训练后为 3.0263。
+- CoT-SFT 能形成结构化推理模式，但收益不稳定。Reasoning Dropout 0.2 提高双模式鲁棒性和 think 完整率，却略损伤通用生成 F1。
+- 第一版规则 GRPO 是典型 reward hacking：格式率从 17% 升到 85%，平均奖励从 0.1148 升到 0.3467，但答案准确率始终为 0。
+- 修复奖励解析并增加短答案 warmup 后，选择题最高仅 29%，计数最高 4%，OCR 为 0；更重要的是通用能力一度只保留 46%–51%。
+- 保守 warmup 能把通用 F1 保留在 96% 左右，但 held-out 宏准确率仅 2.5%–3.3%，且真实图像不优于置空/错配图像，因此没有继续扩大 GRPO。
 
-1. **Multimodal Pretrain**：冻结SigLIP，训练Projector和少量语言层，建立视觉语言对齐。
-2. **General VLM-SFT**：学习视觉描述、OCR、计数、问答和指令跟随。
-3. **CoT-SFT**：使用清洗后的结构化一句式推理数据注入推理模式。
-4. **Reasoning Dropout**：随机移除完整think块，缓解模型对固定模板的依赖。
-5. **Rule-based GRPO**：在选择题、数字、OCR和短答案任务上使用可验证规则奖励优化答案决策。
+## 核心发现
 
-## 方案对比
+1. **格式奖励不是能力奖励。** 对 100M 模型而言，XML 标签比视觉答案容易学习得多；只要格式分可以独立获得，策略就会优先优化外壳。
+2. **token loss 和视觉 grounded accuracy 必须分开看。** 模型能在 teacher-forced loss 上表现出图像依赖，却仍可能在自由生成时依赖语言先验。
+3. **RL 之前必须先有非零且稳定的成功样本。** 当 greedy 和采样准确率接近零时，GRPO 缺少可用组内优势，增加 rollout 只会放大奖励设计问题。
+4. **100M 容量下灾难性遗忘非常敏感。** 高权重短答案监督能快速改善格式和选择题，但会明显侵蚀通用生成；冻结底层并加入 30% replay 可保留能力，却不能补出原本不存在的视觉决策能力。
+5. **失败是有边界的结论。** 当前结果不说明 GRPO 对小模型普遍无效，而说明该 checkpoint 尚未达到适合 RL 的能力门槛；先改善视觉 grounding 和短答案 SFT，比继续调 KL/奖励权重更关键。
 
-| 早期方案 | 当前方案 | 原因 |
-|---|---|---|
-| 约67M、8层默认结构 | 约109M、16层Reason主线 | 与`reason_768.pth`严格兼容 |
-| `strict=False`宽松加载 | 主干权重严格shape校验 | 防止静默加载错误 |
-| 写死P16/256视觉输入 | 自动读取P32/256 patch数量 | 适配实际下载的视觉模型 |
-| 普通SFT和CoT脚本分叉 | 共用`train_sft_vlm.py` | 减少重复训练代码 |
-| 只截短推理 | 独立Reasoning Dropout | 正确验证模板依赖假设 |
-| GRPO冻结LLM | GRPO更新LLM与Projector | 让策略模型真正学习 |
-| answer标签与reward解析错配 | 统一解析`<answer>` | 保证正确答案获得奖励 |
-| 单卡串行蒸馏 | 4卡vLLM异步蒸馏 | 将30万样本压缩到一个工作日完成 |
-
-### 训练阶段对比
-
-| 阶段 | 初始化 | 可训练模块 | 数据 | 主要目标 |
-|---|---|---|---:|---|
-| Multimodal Pretrain | Reason LLM | Projector + LLM第0层 | 127万 | 视觉语言对齐 |
-| General VLM-SFT | Pretrain | Projector + LLM | 30–290万 | 通用读图与指令跟随 |
-| CoT-SFT | General SFT | Projector + LLM | 18.6万 + 混合数据 | 注入结构化推理 |
-| GRPO | CoT-SFT | Policy LLM + Projector | 1千–2万 | 优化可验证答案决策 |
-
-### 核心消融对比
-
-| 对比 | 控制变量 | 回答的问题 |
-|---|---|---|
-| Real Image vs Zero Image | 文本、模型、样本一致 | 模型是否真正使用图像？ |
-| SFT-300K vs SFT-600K | 训练配置一致 | 增加SFT数据是否继续有效？ |
-| General SFT vs CoT-SFT | 是否加入CoT | CoT是否提升推理能力？ |
-| Dropout 0 vs 0.2 | 推理数据一致 | 随机丢弃是否缓解模板依赖？ |
-| CoT-SFT vs GRPO | 初始化与评测集一致 | 规则奖励是否提升答案准确率？ |
-
-### 数据版本对比
-
-| 数据 | 样本数 | 用途 | 状态 |
-|---|---:|---|---|
-| Pretrain | 1,274,698 | 视觉语言对齐 | 已就绪 |
-| General SFT | 2,904,511 | 通用视觉指令 | 已就绪 |
-| Distilled CoT | 300,023 | 清洗前对照 | 已完成 |
-| Clean CoT | 186,094 | CoT-SFT主数据 | 已完成 |
-
-## 已完成实验概览
-
-### CoT数据蒸馏
-
-- 原始图文指令：2,904,511条
-- 通过前置过滤：2,202,245条
-- 四卡蒸馏结果：300,023条
-- 成功率：99.49%
-- 总耗时：约8小时13分钟
-- 最终吞吐：约10.15 samples/s
-
-### CoT质量清洗
-
-- 过滤模板化元推理：113,929条
-- Clean CoT：186,094条
-- 保留率：62.03%
-- 格式错误、空答案、损坏图片：0
-
-### Multimodal Pretrain
-
-| 指标 | 结果 |
-|---|---:|
-| 训练数据 | 1,273,674 |
-| 固定验证集 | 1,024 |
-| 训练步数 | 39,803 |
-| 训练耗时 | 1小时53分 |
-| 日志首点 / 末点loss | 6.046 / 3.185 |
-| 最后20点平均loss | 2.859 |
-| 峰值显存 | 2.44 GB/卡 |
-| Real-image validation loss | 3.0470 |
-| Zero-image validation loss | 3.7419 |
-| Shuffled-image validation loss | 3.6754 |
-
-真实图像的验证loss明显低于置空图和错配图，说明模型不仅接收到了视觉信号，也在使用与文本匹配的图像语义。
-
-### General VLM-SFT规模实验
-
-| 模型 | 训练样本 | 末20点平均loss | 固定验证loss | 256样本Real-image loss |
-|---|---:|---:|---:|---:|
-| Pretrain | 1,273,674 | - | - | 4.9485 |
-| SFT-30K | 30,000 | 3.44 | - | 4.0518 |
-| SFT-300K | 300,000 | 3.2149 | 3.5408 | - |
-| SFT-600K | 600,000 | 3.0104 | 3.3331 | 3.3800 |
-| SFT-Full（600K续训） | +2,303,511未见样本 | 2.7593 | 3.0263 | 3.0692 |
-
-600K与300K从同一个Pretrain checkpoint初始化，使用相同固定验证集。600K将固定验证loss从3.5408降至3.3331。随后从600K权重继续训练未见过的2,303,511条数据，最终固定验证loss降至3.0263，相对600K再降低9.20%。最终模型的Zero/Shuffled loss为3.3161/3.3081，均高于Real loss 3.0692，说明全量SFT后仍保留匹配视觉语义依赖。
-
-### CoT-SFT与Reasoning Dropout
-
-CoT训练使用185,023条去重训练样本与61,675条General replay（25%），两组均从同一SFT-Full权重训练2 epochs。
-
-| 模型 | 固定验证loss | General token F1 | CoT reasoning-off F1 | CoT reasoning-on F1 | think完整率 |
-|---|---:|---:|---:|---:|---:|
-| CoT-SFT RD=0 | 2.5152 | 0.2420 | 0.2519 | 0.2280 | 76% |
-| CoT-SFT RD=0.2 | 2.5243 | 0.2274 | 0.2625 | 0.2316 | 83% |
-
-RD=0更好地保持通用生成能力，RD=0.2在有/无思考模式之间更稳健。项目保留RD=0作为通用基线，并选择RD=0.2进入1,000条规则奖励GRPO冒烟。
-
-详细记录见 [EXPERIMENT_REPORT.md](./EXPERIMENT_REPORT.md)，后续安排见 [EXPERIMENT_PLAN.md](./EXPERIMENT_PLAN.md)。
-
-## 当前效果
-
-当前已完成CoT数据工程、Multimodal Pretrain、分阶段全量General SFT，以及CoT-SFT RD=0/0.2严格对照。下一阶段为1,000条可验证短答案GRPO冒烟。
-
-| 模型阶段 | 普通VQA | OCR | 计数 | 可验证推理 | 格式合规率 |
-|---|---:|---:|---:|---:|---:|
-| Reason LLM（无视觉） | - | - | - | 待测 | 待测 |
-| Multimodal Pretrain | 尚不适合生成式评测 | 尚不适合生成式评测 | 尚不适合生成式评测 | - | - |
-| General VLM-SFT | 已完成固定生成评测 | 已完成固定生成评测 | 已完成固定生成评测 | - | - |
-| CoT-SFT | F1 0.2386 | F1 0.2486 | F1 0.1978 | CoT F1 0.2280 | think 76% |
-| CoT-SFT + GRPO | 待实验 | 待实验 | 待实验 | 待实验 | 待实验 |
-
-## 主要文件
+## 代码入口
 
 ```text
-model/model_profiles.py             统一的reason_vlm_109m配置
-model/model_minimind.py             Reason LLM结构
-model/model_vlm.py                  SigLIP与Vision Projector
-trainer/train_pretrain_vlm.py       多模态预训练
-trainer/train_sft_vlm.py            普通SFT与CoT-SFT
-trainer/train_grpo_vlm.py           原生PyTorch GRPO
-scripts/validate_reason_checkpoint.py  权重兼容验证
-dataset/distill_multigpu.py         四卡异步蒸馏
-dataset/filter_meta_reasoning.py     元推理清洗
+model/model_profiles.py                 109M 模型配置
+model/model_minimind.py                 语言模型与停止序列生成
+model/model_vlm.py                      SigLIP、Projector 与加权 token loss
+trainer/train_pretrain_vlm.py           多模态预训练
+trainer/train_sft_vlm.py                General / CoT / 短答案 SFT
+trainer/train_grpo_vlm.py               原生 PyTorch 规则 GRPO
+scripts/audit_grpo_reward.py            GRPO 前后奖励审计
+scripts/evaluate_rl_by_task.py          分任务短答案评测
+scripts/evaluate_warmup_v3_diagnostics.py 真实/置空/错配图诊断
+tests/test_reward_parser.py             奖励解析回归测试
 ```
 
-## 训练环境
+更完整的参数、对照设计和图表见 [EXPERIMENT_REPORT.md](./EXPERIMENT_REPORT.md)。
 
-- 4×NVIDIA A10 24GB
+## 环境
+
+- 4 × NVIDIA A10 24GB
 - PyTorch DDP
-- SwanLab实验监控
-- vLLM仅用于教师数据蒸馏
+- SwanLab 记录训练过程
+- vLLM 仅用于教师 CoT 数据蒸馏
 
-本项目的GRPO暂不使用VERL。对于单机4卡和约109M模型，原生PyTorch实现更便于控制rollout、奖励、KL和消融变量；如果未来扩展到多机、大规模异步rollout或独立推理集群，再考虑迁移到VERL。
+GRPO 保留为项目中的规则优化实现，但不把当前失败 checkpoint 作为最终模型。对于单机 4 卡和约 109M 模型，原生 PyTorch 实现足以控制 rollout、KL、奖励与消融变量。
