@@ -38,6 +38,14 @@ flowchart LR
 - 修复奖励解析并增加短答案 warmup 后，选择题最高仅 29%，计数最高 4%，OCR 为 0；更重要的是通用能力一度只保留 46%–51%。
 - 保守 warmup 能把通用 F1 保留在 96% 左右，但 held-out 宏准确率仅 2.5%–3.3%，且真实图像不优于置空/错配图像，因此没有继续扩大 GRPO。
 
+### 训练与探索概览
+
+![Multimodal Pretrain loss curve](./experiment_runs/p1_pretrain/loss_curve.png)
+
+![General VLM-SFT scale comparison](./experiment_runs/p2_sft_comparison.png)
+
+![RL exploration findings](./experiment_runs/rl_exploration_findings.png)
+
 ## 核心发现
 
 1. **格式奖励不是能力奖励。** 对 100M 模型而言，XML 标签比视觉答案容易学习得多；只要格式分可以独立获得，策略就会优先优化外壳。

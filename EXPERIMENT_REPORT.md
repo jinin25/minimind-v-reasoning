@@ -41,6 +41,8 @@
 
 ### 3.2 结果
 
+![Multimodal Pretrain loss curve](./experiment_runs/p1_pretrain/loss_curve.png)
+
 | 条件 | Validation loss | 相对真实图 |
 |---|---:|---:|
 | Real image | 3.0470 | — |
@@ -52,6 +54,8 @@
 ## 4. 通用 VLM-SFT 的数据规模收益
 
 300K 与 600K 均从同一个 Pretrain checkpoint 初始化，配置和固定验证集一致；600K 集合包含 300K 集合。Full 是从 600K checkpoint 对剩余 2,303,511 条未见样本继续训练，因此只用于展示最终构建结果，不作为严格同初始化消融。
+
+![General VLM-SFT scale comparison](./experiment_runs/p2_sft_comparison.png)
 
 | 模型 | 训练数据 | 末 20 点训练 loss | 固定验证 loss | 256 样本 real-image loss |
 |---|---:|---:|---:|---:|
